@@ -1,0 +1,36 @@
+{
+  "atualizado": "2026-02-14T22:49:31.469453",
+  "ciclo": 69,
+  "pre_janela": [
+    {
+      "id": 1521065,
+      "home": "Vasco DA Gama",
+      "away": "Volta Redonda",
+      "liga": "Carioca - 1",
+      "minuto": 51,
+      "placar": "0-1",
+      "fase": "pre_janela"
+    },
+    {
+      "id": 1491879,
+      "home": "Atletico Tucuman",
+      "away": "Estudiantes de Rio Cuarto",
+      "liga": "Liga Profesional Argentina",
+      "minuto": 45,
+      "placar": "2-0",
+      "fase": "pre_janela"
+    },
+    {
+      "id": 1491887,
+      "home": "Independ. Rivadavia",
+      "away": "Belgrano Cordoba",
+      "liga": "Liga Profesional Argentina",
+      "minuto": 45,
+      "placar": "0-1",
+      "fase": "pre_janela"
+    }
+  ],
+  "na_janela": [],
+  "pos_janela": [],
+  "ids_observados": []
+}

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python tests/test_score.py:*)",
+      "Bash(python:*)",
+      "Bash(docker --version:*)",
+      "Bash(curl:*)",
+      "Bash(docker stop:*)",
+      "Bash(docker rm:*)",
+      "Bash(docker run:*)",
+      "Bash(docker login:*)",
+      "Bash(docker pull:*)",
+      "Bash(dir:*)"
+    ]
+  }
+}
