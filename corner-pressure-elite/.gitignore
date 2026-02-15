@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 *.db
 logs/
+data/live_state.json
 .venv/
 venv/
 *.egg-info/
