@@ -80,6 +80,47 @@ class RegistroSinal:
     projecao: float = 0.0
     edge: float = 0.0
     pressure_score: int = 0
+    tipo_sinal: str = "NORMAL"
+    resultado: Optional[str] = None
+    escanteios_final: Optional[int] = None
+    roi: Optional[float] = None
+
+
+@dataclass
+class OddsAoVivo:
+    """Odds ao vivo para um jogo (escanteios)."""
+    fixture_id: int
+    linha: float
+    odd_over: float
+    odd_under: float
+    bookmaker: str
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    @property
+    def implicito_under(self) -> float:
+        """Probabilidade implícita do Under (1 / odd_under)."""
+        return round(1 / self.odd_under * 100, 1) if self.odd_under > 0 else 0
+
+    @property
+    def implicito_over(self) -> float:
+        """Probabilidade implícita do Over (1 / odd_over)."""
+        return round(1 / self.odd_over * 100, 1) if self.odd_over > 0 else 0
+
+
+@dataclass
+class ResultadoJogo:
+    """Resultado final de um jogo."""
+    fixture_id: int
+    escanteios_totais: int
+    placar_final: dict  # {"home": 2, "away": 1}
+    status: str  # "FT", "AET", "PEN"
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    def resultado_signal(self, linha_apoio: float) -> str:
+        """Retorna 'GREEN' se escanteios_totais > linha_apoio, 'RED' caso contrario."""
+        return "GREEN" if self.escanteios_totais > linha_apoio else "RED"
+    edge: float = 0.0
+    pressure_score: int = 0
     tipo_sinal: str = ""
     reavaliacao: bool = False
     resultado: Optional[str] = None  # 'GREEN', 'RED', None

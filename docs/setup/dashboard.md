@@ -22,32 +22,32 @@ O Dashboard roda na porta **3001** para evitar conflito com o WAHA (porta 3000).
 
 ### Opcao 1: Script automatizado
 
-```powershell
-cd "C:\Users\danew\Documents\CORNER PRESSURE ELITE"
-.\start_all.ps1
+```bash
+cd /home/daniel/cornerpressureelite
+./start_all.sh
 ```
 
 ### Opcao 2: Manual
 
 **Terminal 1 - WAHA** (Docker):
-```powershell
-docker run -d --name waha -p 3000:3000 -v ~/.waha:/app/.sessions devlikeapro/waha:latest
+```bash
+docker run -d --name waha -p 3000:3000 -v ~/.waha:/app/.sessions devlikeapro/waha-plus:latest
 ```
 
 **Terminal 2 - Backend** (porta 8000):
-```powershell
+```bash
 cd corner-pressure-elite
 uvicorn api_server:app --host 127.0.0.1 --port 8000
 ```
 
 **Terminal 3 - Frontend** (porta 3001):
-```powershell
+```bash
 cd dashboard
 npm run dev
 ```
 
 **Terminal 4 - Monitor/Main**:
-```powershell
+```bash
 cd corner-pressure-elite
 python monitor.py
 # ou

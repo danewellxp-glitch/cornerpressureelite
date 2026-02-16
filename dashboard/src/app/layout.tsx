@@ -17,6 +17,9 @@ export const metadata: Metadata = {
   description: "Corner Pressure Elite System - Dashboard em tempo real",
 };
 
+// Desabilitar caching static para páginas dinâmicas
+export const revalidate = 0;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -25,7 +28,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#0a0a0a] text-white`}
       >
         {children}
       </body>

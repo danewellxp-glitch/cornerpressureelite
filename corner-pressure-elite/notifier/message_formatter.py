@@ -3,7 +3,7 @@ Formatador de mensagens WhatsApp para o CPES.
 Usa negrito (*texto*) compativel com WhatsApp.
 """
 
-from typing import Dict
+from typing import Dict, List
 from data.models import Sinal
 
 
@@ -31,14 +31,15 @@ class MessageFormatter:
             f"\n"
             f"\U0001f4c8 *AN\u00c1LISE:*\n"
             f"Escanteios atuais: {jogo.escanteios_total}\n"
-            f"Linha: {jogo.linha_atual}\n"
-            f"Proje\u00e7\u00e3o: {sinal.projecao}\n"
+            f"Linha (mercado): {jogo.linha_atual}\n"
+            f"Proje\u00e7\u00e3o (CPES): {sinal.projecao}\n"
             f"Edge: +{sinal.edge:.2f}\n"
             f"\n"
             f"\U0001f525 *Pressure Score:* {sinal.pressure_score}/10\n"
             f"\n"
-            f"\U0001f4b0 *MERCADO:*\n"
-            f"Odd: {jogo.odd_atual}\n"
+            f"\U0001f4b0 *MERCADO (Odds ao vivo):*\n"
+            f"Over: {jogo.odd_atual}x\n"
+            f"Linha: {jogo.linha_atual}\n"
             f"Stake sugerida: 1u\n"
             f"\n"
             f"\u26a0\ufe0f *Tipo:* {tipo_footer}\n"
@@ -90,6 +91,122 @@ class MessageFormatter:
             f"\U0001f4b0 ROI: {stats.get('roi_total', 0):.2f}u\n"
         )
         return msg
+
+    @staticmethod
+    def format_upcoming_games(games: List[Dict]) -> str:
+        """Formata agenda de jogos do dia para WhatsApp."""
+        if not games:
+            return (
+                "\U0001f4c5 *AGENDA DO DIA - CPES*\n"
+                "\n"
+                "Nenhum jogo programado para hoje nas ligas monitoradas."
+            )
+
+        msg = (
+            f"\U0001f4c5 *AGENDA DO DIA - CPES*\n"
+            f"\n"
+            f"\u26bd *{len(games)} jogos programados:*\n"
+            f"\n"
+        )
+
+        # Agrupar por liga
+        by_liga: Dict[str, list] = {}
+        for g in games:
+            liga = g.get("liga", "?")
+            by_liga.setdefault(liga, []).append(g)
+
+        for liga, liga_games in sorted(by_liga.items()):
+            msg += f"\U0001f3c6 *{liga}*\n"
+            for g in sorted(liga_games, key=lambda x: x.get("timestamp", 0)):
+                hora = g.get("hora_inicio", "?")
+                home = g.get("home", "?")
+                away = g.get("away", "?")
+                msg += f"  \u23f0 {hora} - {home} vs {away}\n"
+            msg += "\n"
+
+        msg += "\U0001f50d Sistema monitorando automaticamente."
+        return msg
+
+    @staticmethod
+    def format_pre_game_alert(games: List[Dict]) -> str:
+        """Formata alerta de jogos prestes a comecar."""
+        msg = (
+            f"\U0001f6a8 *JOGOS COME\u00c7ANDO EM BREVE!*\n"
+            f"\n"
+        )
+        for g in games:
+            hora = g.get("hora_inicio", "?")
+            home = g.get("home", "?")
+            away = g.get("away", "?")
+            liga = g.get("liga", "?")
+            mins = g.get("minutos_ate", 0)
+            msg += f"\u26bd {hora} - {home} vs {away}\n"
+            msg += f"   {liga} | Em {mins} min\n"
+        msg += f"\n\U0001f50d Sistema entrando em modo de analise."
+        return msg
+
+    @staticmethod
+    def format_health_response(status: Dict) -> str:
+        """Formata resposta de saude do sistema para comando admin."""
+        online = "\U0001f7e2 Online" if status.get("online") else "\U0001f534 Offline"
+        return (
+            f"\U0001f916 *STATUS DO SISTEMA*\n"
+            f"\n"
+            f"{online}\n"
+            f"\U0001f4e1 API Football: {status.get('api_usado', '?')}/{status.get('api_limite', '?')}\n"
+            f"\u26bd Jogos ao vivo: {status.get('jogos_ao_vivo', 0)}\n"
+            f"\U0001f50d Na janela: {status.get('jogos_na_janela', 0)}\n"
+            f"\U0001f4ca Ciclo: #{status.get('ciclo', '?')}\n"
+            f"\u23f0 Ultimo update: {status.get('ultimo_update', '?')}"
+        )
+
+    @staticmethod
+    def format_upcoming_response(games: List[Dict]) -> str:
+        """Formata resposta de proximos jogos para comando admin."""
+        if not games:
+            return "\u26bd *PR\u00d3XIMOS JOGOS*\n\nNenhum jogo programado."
+
+        msg = f"\u26bd *PR\u00d3XIMOS JOGOS ({len(games)})*\n\n"
+        for g in games:
+            hora = g.get("hora_inicio", "?")
+            home = g.get("home", "?")
+            away = g.get("away", "?")
+            liga = g.get("liga", "?")
+            mins = g.get("minutos_ate", 0)
+            status = g.get("status", "NS")
+            if status != "NS" and mins == 0:
+                msg += f"\U0001f534 {hora} - {home} vs {away} ({liga}) - *EM ANDAMENTO*\n"
+            else:
+                msg += f"\u23f0 {hora} - {home} vs {away} ({liga}) - em {mins}min\n"
+        return msg
+
+    @staticmethod
+    def format_stats_response(stats: Dict) -> str:
+        """Formata resposta de stats para comando admin."""
+        return (
+            f"\U0001f4ca *PERFORMANCE CPES*\n"
+            f"\n"
+            f"Total sinais: {stats.get('total', 0)}\n"
+            f"\u2705 Greens: {stats.get('greens', 0)}\n"
+            f"\u274c Reds: {stats.get('reds', 0)}\n"
+            f"\U0001f4ca Winrate: {stats.get('winrate', 0):.1f}%\n"
+            f"\U0001f4b0 ROI: {stats.get('roi_total', 0):+.2f}u\n"
+            f"\u23f3 Pendentes: {stats.get('pendentes', 0)}"
+        )
+
+    @staticmethod
+    def format_help_response() -> str:
+        """Formata lista de comandos disponiveis."""
+        return (
+            "\U0001f916 *COMANDOS CPES*\n"
+            "\n"
+            "/status - Sa\u00fade do sistema\n"
+            "/jogos - Pr\u00f3ximos jogos do dia\n"
+            "/stats - Performance (greens, reds, ROI)\n"
+            "/help - Esta mensagem\n"
+            "\n"
+            "_Aceita com ou sem / (ex: status ou /status)_"
+        )
 
     @staticmethod
     def format_error(error_message: str) -> str:

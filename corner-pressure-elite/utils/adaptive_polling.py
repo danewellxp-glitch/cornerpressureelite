@@ -1,10 +1,12 @@
 """
 Sistema de polling adaptativo baseado no minuto do jogo e escanteios.
-- 0-30 min: 5 min | 31-50 min: 3 min (ou 1 min se 7+ escanteios - early trigger)
+- 0-24 min: 5 min | 25-50 min: 3 min (ou 1 min se 7+ escanteios - early trigger)
 - 50-90 min: 1 min (janela) | 90+ min: 30 seg (acréscimos)
 """
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
+
+from config import ESCANTEIOS_EARLY_WINDOW
 
 
 class AdaptivePolling:
@@ -13,13 +15,13 @@ class AdaptivePolling:
     Early trigger: 7+ escanteios antes do min 50 -> entra em 1 min (na janela).
     """
 
-    ESCANTEIOS_EARLY_TRIGGER = 7
+    ESCANTEIOS_EARLY_TRIGGER = ESCANTEIOS_EARLY_WINDOW
 
     INTERVALS = {
         "primeiro_tempo_inicial": 300,  # 5 min (0-30)
         "pre_janela": 180,  # 3 min (31-50) sem 7 esc
         "pre_janela_early": 60,  # 1 min (31-50 com 7+ esc) - early trigger
-        "janela_analise": 60,  # 1 min (50-90) - JANELA PRINCIPAL
+        "janela_analise": 30,  # 30 seg (50-90) - JANELA PRINCIPAL
         "reta_final": 30,  # 30 seg (90+ acréscimos) - FASE CRITICA
     }
 
@@ -54,9 +56,9 @@ class AdaptivePolling:
         esc = escanteios if escanteios is not None else 0
         early_trigger = esc >= self.ESCANTEIOS_EARLY_TRIGGER
 
-        if minuto <= 30:
+        if minuto <= 30 and not early_trigger:
             return self.INTERVALS["primeiro_tempo_inicial"]
-        elif 31 <= minuto < 50:
+        elif minuto < 50:
             if early_trigger:
                 return self.INTERVALS["pre_janela_early"]
             return self.INTERVALS["pre_janela"]

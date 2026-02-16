@@ -29,6 +29,7 @@ class WhatsAppClient:
         self._session: Optional[aiohttp.ClientSession] = None
         self._headers: Dict[str, str] = {}
         if config.api_key:
+            # WAHA Plus aceita X-Api-Key (compatível com Core)
             self._headers["X-Api-Key"] = config.api_key
 
     async def __aenter__(self):
@@ -132,9 +133,13 @@ class WhatsAppClient:
             "chatId": chat_id,
             "text": text,
         }
-        result = await self._request("POST", "sendText", data)
-        logger.info(f"Mensagem enviada para {chat_id[:15]}...")
-        return result
+        try:
+            result = await self._request("POST", "sendText", data)
+            logger.info(f"✓ Mensagem enviada para {chat_id[:25]}... | Tamanho: {len(text)} chars")
+            return result
+        except Exception as e:
+            logger.error(f"✗ Erro ao enviar para {chat_id[:25]}... | {str(e)}")
+            raise
 
     async def send_image(
         self, chat_id: str, image_url: str, caption: Optional[str] = None

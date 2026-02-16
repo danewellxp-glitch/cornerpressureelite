@@ -23,7 +23,7 @@ if (-not $dockerOk) {
     $wahaRunning = docker ps --filter "name=waha" --format "{{.Names}}" 2>$null
     if ($wahaRunning -ne "waha") {
         Write-Host "Iniciando WAHA na porta 3000..." -ForegroundColor Green
-        docker run -d --name waha -p 3000:3000 -v ~/.waha:/app/.sessions devlikeapro/waha:latest
+        docker run -d --name waha -p 3000:3000 -v ~/.waha:/app/.sessions devlikeapro/waha-plus:latest
         Start-Sleep -Seconds 3
     } else {
         Write-Host "WAHA ja esta rodando" -ForegroundColor Green

@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "main": ".open-next/worker.js",
+  "name": "corner-pressure-dashboard",
+  "compatibility_date": "2024-12-30",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "corner-pressure-dashboard"
+    }
+  ],
+  "images": {
+    "binding": "IMAGES"
+  },
+  // Variáveis de ambiente para produção
+  "vars": {
+    "NEXTJS_ENV": "production",
+    "NODE_ENV": "production"
+  },
+  // Defina CPES_API_URL no Cloudflare Dashboard se usar Workers
+  // Workers & Pages → corner-pressure-dashboard → Settings → Environment variables
+  // Domínio: adicione odontoschultz.online no Cloudflare Dashboard após o deploy
+  // Workers & Pages → corner-pressure-dashboard → Settings → Domains & Routes
+}
+

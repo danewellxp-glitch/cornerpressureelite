@@ -1,0 +1,56 @@
+# Projeto: Corner Pressure Elite System (CPES)
+
+Motor automatizado de analise de escanteios ao vivo para sinais de apostas esportivas.
+
+## Stack
+- Backend: Python 3.12 (FastAPI) em corner-pressure-elite/
+- Frontend: Next.js + TypeScript em dashboard/
+- Infra: Docker Compose, Cloudflare Workers/Tunnel
+- Notificacoes: WAHA (WhatsApp HTTP API)
+
+## Regras de documentacao
+
+Toda documentacao DEVE ir em docs/. Nunca crie arquivos .md na raiz do projeto.
+
+### Categorias
+
+| Categoria | Pasta | O que vai aqui |
+|-----------|-------|----------------|
+| Architecture | docs/architecture/ | Design do sistema, specs tecnicas, modelos de dados, analises |
+| Setup | docs/setup/ | Guias de deploy, config de ambiente, infra, como rodar |
+| Changelog | docs/changelog/ | Registros de mudancas. Nomear YYYY-MM-DD-slug.md |
+| Strategy | docs/strategy/ | Estrategias de aposta, tuning de parametros, backtesting |
+
+### Convencoes
+- Nomes em kebab-case minusculo (ex: decision-model.md)
+- Changelogs com data: 2026-02-15-strategy-tuning.md
+- Apos criar um doc, atualizar docs/README.md com link na tabela da categoria
+
+### O que NAO fazer
+- Nao criar .md na raiz do projeto
+- Nao misturar docs de setup com docs de architecture
+- Nao misturar docs de design com docs de setup
+
+## Localizacao do codigo
+- Engine de analise: corner-pressure-elite/engine/
+- API server: corner-pressure-elite/api_server.py
+- Config/thresholds: corner-pressure-elite/config.py
+- Robo principal: corner-pressure-elite/main.py
+- Dashboard pages: dashboard/src/
+- Testes: corner-pressure-elite/tests/
+- Modelos de dados: corner-pressure-elite/data/models.py
+
+## Portas
+- 3000: WAHA (WhatsApp API)
+- 3001: Dashboard (Next.js)
+- 8000: API (FastAPI)
+
+## Dominio
+- https://odontoschultz.online — Dashboard (Cloudflare Tunnel)
+- https://api.odontoschultz.online — API
+- ssh.odontoschultz.online — SSH via Cloudflare Tunnel
+
+## Comandos
+- docker compose up -d — Inicia todos os servicos
+- ./start_all.sh — Inicia nativo (sem Docker)
+- ./kill_all.sh — Para todos os servicos

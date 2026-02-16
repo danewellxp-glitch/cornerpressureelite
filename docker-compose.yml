@@ -1,0 +1,97 @@
+# CPES - Corner Pressure Elite System
+# Sistema completo: WAHA (WhatsApp), FastAPI, Dashboard Next.js, API Python
+
+services:
+  waha:
+    image: devlikeapro/waha-plus:latest
+    container_name: waha
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - TZ=America/Sao_Paulo
+      # WAHA Plus - Autenticação e Segurança
+      - WAHA_API_KEY=waha_sk_d3e9f4a1b5c7e2f8a9d1c3e5f7a9b1d3e5f7a9b1
+      - WAHA_DASHBOARD_USERNAME=admin
+      - WAHA_DASHBOARD_PASSWORD=Cpes2026@WhatsApp!Secure
+      - WAHA_ENABLE_SWAGGER_AUTH=true
+      - WAHA_ENABLE_DEMO_PANEL=false
+      # Webhook - push events em tempo real (PLUS feature)
+      - WAHA_WEBHOOK_URL=http://cpes-api:8000/api/webhook/whatsapp
+      - WAHA_WEBHOOK_EVENTS=message
+      - WAHA_WEBHOOK_MODE=PUSH
+    volumes:
+      - waha-sessions:/app/.sessions
+    networks:
+      - cpes-network
+
+  api:
+    build:
+      context: ./corner-pressure-elite
+      dockerfile: Dockerfile
+    container_name: cpes-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - WAHA_URL=http://waha:3000
+      - DB_PATH=/app/data/cpes.db
+      - LOG_LEVEL=INFO
+      - TZ=America/Sao_Paulo
+    env_file:
+      - path: ./corner-pressure-elite/.env
+        required: false
+    volumes:
+      - ./corner-pressure-elite/data:/app/data
+      - ./corner-pressure-elite/logs:/app/logs
+    depends_on:
+      - waha
+    networks:
+      - cpes-network
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: cpes-dashboard
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - CPES_API_URL=http://api:8000
+      - TZ=America/Sao_Paulo
+    depends_on:
+      - api
+    networks:
+      - cpes-network
+
+  # Robô principal (main.py) - analisa jogos e envia alertas
+  main:
+    build:
+      context: ./corner-pressure-elite
+      dockerfile: Dockerfile
+    container_name: cpes-main
+    restart: unless-stopped
+    command: python main.py
+    environment:
+      - WAHA_URL=http://waha:3000
+      - DB_PATH=/app/data/cpes.db
+      - TZ=America/Sao_Paulo
+    env_file:
+      - path: ./corner-pressure-elite/.env
+        required: false
+    volumes:
+      - ./corner-pressure-elite/data:/app/data
+      - ./corner-pressure-elite/logs:/app/logs
+    depends_on:
+      - waha
+      - api
+    networks:
+      - cpes-network
+
+volumes:
+  waha-sessions:
+
+networks:
+  cpes-network:
+    driver: bridge

@@ -13,7 +13,7 @@ import os
 import time
 import logging
 from typing import Dict, List, Any
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 # Adicionar diretorio raiz ao path
 sys.path.insert(0, os.path.dirname(__file__))
@@ -34,6 +34,8 @@ from config import (
     WHATSAPP_ADMIN,
     WHATSAPP_UPDATES,
     DAILY_SUMMARY_TIME,
+    UPCOMING_NOTIFICATION_TIME,
+    PRE_GAME_ALERT_MINUTES,
 )
 from data.api_client import APIFootballClient
 from engine.decision_engine import DecisionEngine
@@ -45,7 +47,7 @@ from storage.logger import setup_logging
 from utils.rate_limiter import RateLimiter
 from utils.adaptive_polling import AdaptivePolling
 from utils.helpers import parse_fixture_to_jogo
-from data_reader import LIVE_STATE_PATH
+from data_reader import LIVE_STATE_PATH, UPCOMING_GAMES_PATH, AUDIT_STATE_PATH
 
 logger = logging.getLogger("CPES.Main")
 
@@ -78,7 +80,7 @@ class CornerPressureElite:
     def __init__(self):
         self.rate_limiter = RateLimiter(
             max_requests_per_day=API_DAILY_LIMIT,
-            max_requests_per_minute=10,
+            max_requests_per_minute=450,  # API-Football Pro permite 450/min
         )
         self.api_client = APIFootballClient(API_FOOTBALL_KEY, self.rate_limiter)
         self.decision_engine = DecisionEngine()
@@ -102,6 +104,11 @@ class CornerPressureElite:
         )
         self.adaptive_polling = AdaptivePolling()
         self._escanteios_cache: Dict[int, int] = {}
+        self._today_schedule: List[Dict] = []
+        self._schedule_date: str = ""
+        self._last_schedule_fetch: float = 0  # timestamp da ultima busca de agenda
+        self._last_morning_msg_date = None  # date do ultimo resumo matinal
+        self._pre_game_alerted: set = set()  # timestamps de jogos ja alertados
 
     async def iniciar(self):
         """Inicializa o sistema e comeca o loop principal."""
@@ -117,6 +124,14 @@ class CornerPressureElite:
 
         # Inicializar banco de dados
         await self.database.init()
+        
+        # Inicializar config de ligas
+        from config import LIGAS_MONITORADAS
+        all_liga_ids = [liga["id"] for liga in LIGAS_MONITORADAS]
+        await self.database.init_ligas_config(all_liga_ids)
+        
+        # Inicializar config de thresholds
+        await self.database.init_thresholds_config()
 
         # Inicializar notificador WhatsApp
         await self.notifier.start()
@@ -171,12 +186,220 @@ class CornerPressureElite:
         finally:
             await self._shutdown()
 
+    async def _fetch_today_schedule(self, force: bool = False):
+        """Busca agenda do dia. Pode ser forcada para refresh periodico."""
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # Pular se ja buscou recentemente (a nao ser que force=True ou mudou o dia)
+        if not force and self._schedule_date == today and self._today_schedule:
+            return
+
+        try:
+            # Carregar ligas ativas da database
+            ligas_ativas = await self.database.get_ligas_ativas()
+            
+            self._today_schedule = await self.api_client.get_today_schedule(
+                ligas_ativas, today
+            )
+            self._schedule_date = today
+
+            if self._today_schedule:
+                horarios = []
+                for f in self._today_schedule:
+                    ts = f.get("fixture", {}).get("timestamp", 0)
+                    if ts:
+                        horarios.append(datetime.fromtimestamp(ts, tz=timezone.utc))
+                horarios.sort()
+
+                nomes = []
+                for f in self._today_schedule:
+                    teams = f.get("teams", {})
+                    h = teams.get("home", {}).get("name", "?")
+                    a = teams.get("away", {}).get("name", "?")
+                    ts = f.get("fixture", {}).get("timestamp", 0)
+                    hora = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone().strftime("%H:%M") if ts else "?"
+                    nomes.append(f"  {hora} - {h} vs {a}")
+
+                logger.info(
+                    f"Agenda do dia: {len(self._today_schedule)} jogos\n"
+                    + "\n".join(nomes)
+                )
+                
+                # Salvar próximos jogos formatados para dashboard
+                self._save_upcoming_games()
+            else:
+                logger.info("Nenhum jogo programado para hoje nas ligas monitoradas")
+                self._save_upcoming_games([])
+        except Exception as e:
+            logger.error(f"Erro ao buscar agenda: {e}")
+    
+    def _save_upcoming_games(self, games: List[Dict] = None):
+        """Salva próximos jogos em arquivo JSON para dashboard."""
+        if games is None:
+            games = self._today_schedule or []
+        
+        now = datetime.now(timezone.utc)
+        upcoming = []
+        
+        for f in games:
+            ts = f.get("fixture", {}).get("timestamp", 0)
+            if not ts:
+                continue
+            
+            # Pula jogos finalizados
+            fixture_status = f.get("fixture", {}).get("status", {})
+            status_short = fixture_status.get("short", "NS")
+            if status_short in ["FT", "AET", "PEN"]:
+                continue
+            
+            game_start = datetime.fromtimestamp(ts, tz=timezone.utc)
+            game_end_estimate = game_start + timedelta(minutes=105)
+            if now > game_end_estimate:
+                continue
+            
+            # Calcula minutos até início
+            minutes_until = max(0, int((game_start - now).total_seconds() / 60))
+            
+            # Status do jogo
+            fixture_info = f.get("fixture", {})
+            status = fixture_info.get("status", {})
+            status_short = status.get("short", "NS")  # NS = Not Started
+            
+            teams = f.get("teams", {})
+            goals = f.get("goals", {}) or {}
+            league = f.get("league", {})
+            
+            upcoming.append({
+                "id": fixture_info.get("id", 0),
+                "timestamp": ts,
+                "hora_inicio": game_start.astimezone().strftime("%H:%M"),
+                "minutos_ate": minutes_until,
+                "home": teams.get("home", {}).get("name", "?"),
+                "away": teams.get("away", {}).get("name", "?"),
+                "liga": league.get("name", "?"),
+                "placar": f"{goals.get('home', 0) or 0}-{goals.get('away', 0) or 0}",
+                "status": status_short,
+            })
+        
+        # Ordena por timestamp
+        upcoming.sort(key=lambda x: x["timestamp"])
+        
+        try:
+            os.makedirs(os.path.dirname(UPCOMING_GAMES_PATH), exist_ok=True)
+            with open(UPCOMING_GAMES_PATH, "w", encoding="utf-8") as f:
+                json.dump({
+                    "atualizado": datetime.now().isoformat(),
+                    "proximos": upcoming,
+                }, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"Erro ao salvar próximos jogos: {e}")
+
+
+    def _save_audit_state(self):
+        """Salva dados de auditoria do ciclo para dashboard."""
+        try:
+            audit_data = self.decision_engine.get_audit_data()
+            audit_data["atualizado"] = datetime.now().isoformat()
+            audit_data["ciclo"] = self._cycles
+            os.makedirs(os.path.dirname(AUDIT_STATE_PATH), exist_ok=True)
+            with open(AUDIT_STATE_PATH, "w", encoding="utf-8") as f:
+                json.dump(audit_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.debug(f"Erro ao salvar audit_state: {e}")
+
+    def _minutes_until_next_game(self) -> int:
+        """Retorna minutos ate o proximo jogo comecar. 0 se ja tem jogo rolando."""
+        now = datetime.now(timezone.utc)
+
+        for f in self._today_schedule:
+            ts = f.get("fixture", {}).get("timestamp", 0)
+            if not ts:
+                continue
+            game_start = datetime.fromtimestamp(ts, tz=timezone.utc)
+            # Jogo dura ~105 min, se comecou ha menos de 105 min ainda esta rolando
+            game_end_estimate = game_start + timedelta(minutes=105)
+            if now < game_end_estimate:
+                diff = (game_start - now).total_seconds() / 60
+                return max(0, int(diff))
+
+        return -1  # nenhum jogo restante hoje
+
+    def _idle_interval(self, mins_until: int) -> tuple:
+        """Retorna (segundos_sleep, descricao, deve_atualizar_agenda).
+        Escala progressiva: longe = 2h, perto = mais frequente.
+        """
+        if mins_until < 0:
+            # Sem jogos hoje: atualiza a cada 2h
+            return 7200, "2h (sem jogos hoje)", True
+        elif mins_until > 120:
+            # Jogo em 2h+: atualiza a cada 2h
+            return 7200, "2h", True
+        elif mins_until > 60:
+            # Jogo em 1-2h: atualiza a cada 1h
+            return 3600, "1h", True
+        elif mins_until > 30:
+            # Jogo em 30-60 min: atualiza a cada 15 min
+            return 900, "15min", True
+        elif mins_until > 15:
+            # Jogo em 15-30 min: atualiza a cada 5 min
+            return 300, "5min", False
+        else:
+            # Jogo em < 15 min: polling normal
+            return POLLING_INTERVAL, f"{POLLING_INTERVAL}s", False
+
     async def _main_loop(self):
         """Loop principal de monitoramento."""
         last_status_check = 0
 
         while self._running:
             try:
+                # Buscar agenda do dia (1 req, 1x por dia)
+                await self._fetch_today_schedule()
+
+                # Verificar se tem jogo proximo
+                mins_until = self._minutes_until_next_game()
+
+                if mins_until < 0 or mins_until > 15:
+                    # Sem jogos ou proximo jogo longe -> polling progressivo
+                    sleep_secs, desc, refresh_schedule = self._idle_interval(mins_until)
+
+                    if mins_until < 0:
+                        status_msg = "Sem jogos restantes"
+                        # Reset schedule para nova data (apos meia-noite)
+                        if datetime.now().hour == 0:
+                            self._schedule_date = ""
+                    else:
+                        status_msg = f"Proximo jogo em {mins_until} min"
+
+                    logger.info(f"{status_msg}. Proximo check em {desc}")
+
+                    try:
+                        with open(LIVE_STATE_PATH, "w", encoding="utf-8") as fp:
+                            json.dump({
+                                "atualizado": datetime.now().isoformat(),
+                                "ciclo": self._cycles,
+                                "status": "aguardando",
+                                "proximo_jogo_min": mins_until if mins_until >= 0 else None,
+                                "proximo_check": desc,
+                                "pre_janela": [], "na_janela": [], "pos_janela": [],
+                                "ids_observados": [],
+                            }, fp, ensure_ascii=False)
+                    except Exception:
+                        pass
+
+                    await self._check_daily_summary()
+                    await self._check_upcoming_notifications()
+                    await self._verificar_resultados()
+                    await asyncio.sleep(sleep_secs)
+
+                    # Refresh agenda se necessario (busca novos jogos)
+                    if refresh_schedule:
+                        await self._fetch_today_schedule(force=True)
+                        self._save_upcoming_games()
+
+                    continue
+
+                # Tem jogo rolando ou proximo -> polling ativo
                 self._cycles += 1
                 logger.info(f"--- Ciclo #{self._cycles} ---")
 
@@ -199,9 +422,10 @@ class CornerPressureElite:
                     await asyncio.sleep(600)
                     continue
 
-                # 1. Buscar jogos ao vivo
+                # 1. Buscar jogos ao vivo (1 requisicao para todas as ligas)
                 logger.info("Buscando jogos ao vivo...")
-                fixtures = await self.api_client.get_live_fixtures(LIGA_IDS)
+                ligas_ativas = await self.database.get_ligas_ativas()
+                fixtures = await self.api_client.get_live_fixtures(ligas_ativas)
 
                 if not fixtures:
                     logger.info("Nenhum jogo ao vivo nas ligas monitoradas")
@@ -216,6 +440,7 @@ class CornerPressureElite:
                     except Exception:
                         pass
                     await self._check_daily_summary()
+                    await self._check_upcoming_notifications()
                     await asyncio.sleep(POLLING_INTERVAL)
                     continue
 
@@ -346,6 +571,7 @@ class CornerPressureElite:
                     logger.debug(f"Nao foi possivel salvar live_state: {e}")
 
                 # 3. Analisar apenas jogos que devem ser atualizados (should_poll)
+                self.decision_engine.reset_ciclo_stats()
                 for fixture in jogos_para_analisar:
                     if not self.rate_limiter.can_request():
                         logger.warning("Sem requisicoes - parando analise dos jogos")
@@ -361,6 +587,14 @@ class CornerPressureElite:
                                 if item.get("id") == fid:
                                     item["escanteios"] = jogo.escanteios_total
                                     break
+
+                # Log relatório de auditoria do ciclo
+                audit_report = self.decision_engine.get_ciclo_report()
+                if audit_report:
+                    logger.info(audit_report)
+
+                # Salvar dados de auditoria para dashboard
+                self._save_audit_state()
 
                 # Re-salvar live_state com escanteios atualizados
                 try:
@@ -382,10 +616,14 @@ class CornerPressureElite:
                 except Exception as e:
                     logger.debug(f"Nao foi possivel re-salvar live_state: {e}")
 
-                # 4. Verificar resumo diario
-                await self._check_daily_summary()
+                # 4. Verificar resultados de jogos finalizados (Sprint 2)
+                await self._verificar_resultados()
 
-                # 5. Aguardar proximo ciclo
+                # 5. Verificar resumo diario e notificacoes de agenda
+                await self._check_daily_summary()
+                await self._check_upcoming_notifications()
+
+                # 6. Aguardar proximo ciclo
                 logger.info(
                     f"Restantes: {self.rate_limiter.remaining_daily()} req | "
                     f"Proximo ciclo em {POLLING_INTERVAL}s"
@@ -425,7 +663,26 @@ class CornerPressureElite:
                 f"Placar: {jogo.placar}"
             )
 
-            # Avaliar entrada
+            # Pre-avaliacao: filtros + score SEM buscar odds (economia de 1-2 reqs)
+            pre_score = self.decision_engine.pre_avaliar(jogo)
+            if pre_score is not None:
+                # Jogo passou filtros+score -> buscar odds (vale a pena)
+                odds_data = await self.api_client.get_live_odds(fixture_id)
+                if odds_data:
+                    jogo.linha_atual = odds_data.get("linha", jogo.linha_atual)
+                    jogo.odd_atual = odds_data.get("odd_over", 1.0)
+                    logger.debug(
+                        f"Odds obtidas para {desc}: Linha {jogo.linha_atual} "
+                        f"@ {odds_data.get('odd_over', '?')} ({odds_data.get('bookmaker', '?')})"
+                    )
+
+            # Salvar snapshot para backtest (com odds se disponivel)
+            try:
+                await self.database.salvar_snapshot(jogo)
+            except Exception as snap_err:
+                logger.debug(f"Erro ao salvar snapshot: {snap_err}")
+
+            # Avaliacao completa com auditoria
             sinal = self.decision_engine.avaliar(jogo)
 
             if sinal:
@@ -446,9 +703,129 @@ class CornerPressureElite:
             logger.error(f"Erro ao analisar jogo {desc} ({fixture_id}): {e}")
             return None
 
+    async def _verificar_resultados(self):
+        """Verifica resultados de jogos finalizados e atualiza sinais pendentes (Sprint 2)."""
+        try:
+            # Expirar sinais com mais de 24h sem resultado
+            await self.database.expirar_sinais_antigos()
+
+            # Buscar sinais pendentes (ultimas 24h, sem resultado)
+            sinais_pendentes = await self.database.get_sinais_pendentes()
+
+            if not sinais_pendentes:
+                logger.debug("Nenhum sinal pendente para verificação")
+                return
+
+            # Filtrar: so verificar sinais de jogos com mais de 2h (provavelmente finalizados)
+            from datetime import datetime as dt
+            agora = dt.now()
+            sinais_para_verificar = []
+            for s in sinais_pendentes:
+                try:
+                    ts = dt.fromisoformat(s.timestamp) if isinstance(s.timestamp, str) else s.timestamp
+                    if (agora - ts).total_seconds() >= 7200:  # 2 horas
+                        sinais_para_verificar.append(s)
+                except (ValueError, TypeError):
+                    sinais_para_verificar.append(s)  # na duvida, verifica
+
+            if not sinais_para_verificar:
+                logger.debug("Sinais pendentes ainda recentes (<2h), aguardando...")
+                return
+
+            logger.info(f"Verificando resultados de {len(sinais_para_verificar)} sinais pendentes...")
+
+            resultados_obtidos = []
+
+            for sinal in sinais_para_verificar:
+                if not self.rate_limiter.can_request():
+                    logger.warning("Sem requisições disponíveis para verificar resultados")
+                    break
+
+                jogo_id = sinal.jogo_id
+                resultado_final = await self.api_client.get_fixture_result(jogo_id)
+                
+                if resultado_final:
+                    escanteios_final = resultado_final.get("escanteios_totais", 0)
+                    linha = sinal.linha
+                    
+                    # Determinar se foi GREEN ou RED
+                    resultado = "GREEN" if escanteios_final > linha else "RED"
+                    
+                    # Calcular ROI: se GREEN, ganho = od - 1; se RED, perda = -1
+                    # Nota: odd foi salvo no banco desde Sprint 1
+                    odd = sinal.odd or 1.0
+                    roi = (odd - 1.0) if resultado == "GREEN" else -1.0
+                    
+                    # Atualizar banco de sinais
+                    await self.database.atualizar_resultado(
+                        jogo_id=jogo_id,
+                        resultado=resultado,
+                        escanteios_final=escanteios_final,
+                        roi=roi
+                    )
+
+                    # Atualizar snapshots com resultado (Sprint 3)
+                    try:
+                        await self.database.atualizar_snapshot_resultado(jogo_id, escanteios_final)
+                    except Exception as snap_err:
+                        logger.debug(f"Erro ao atualizar snapshot resultado: {snap_err}")
+                    
+                    resultados_obtidos.append({
+                        "jogo_id": jogo_id,
+                        "jogo_desc": sinal.jogo_descricao,
+                        "resultado": resultado,
+                        "escanteios_final": escanteios_final,
+                        "linha": linha,
+                        "roi": roi,
+                        "odd": odd,
+                    })
+                    
+                    logger.info(
+                        f"Resultado atualizado: {sinal.jogo_descricao} | "
+                        f"{escanteios_final} escs (linha {linha}) | {resultado} {roi:+.2f}u"
+                    )
+            
+            # Enviar notificação com resultados (Sprint 2.4)
+            if resultados_obtidos:
+                await self._enviar_resultados_whatsapp(resultados_obtidos)
+        
+        except Exception as e:
+            logger.error(f"Erro ao verificar resultados: {e}", exc_info=True)
+
+    async def _enviar_resultados_whatsapp(self, resultados: list):
+        """Envia resumo de resultados via WhatsApp (Sprint 2.4)."""
+        try:
+            greens = len([r for r in resultados if r["resultado"] == "GREEN"])
+            reds = len([r for r in resultados if r["resultado"] == "RED"])
+            roi_total = sum(r["roi"] for r in resultados)
+            
+            msg = f"\U0001f4ca *RESULTADOS FINAIS*\n\n"
+            
+            for r in resultados:
+                emoji = "\u2705" if r["resultado"] == "GREEN" else "\u274c"
+                logo = " GANHO" if r["resultado"] == "GREEN" else " PERDA"
+                msg += (
+                    f"{emoji} {r['jogo_desc']}\n"
+                    f"   {r['escanteios_final']} escanteios vs linha {r['linha']}\n"
+                    f"   Odd {r['odd']:.2f}x → {r['roi']:+.2f}u\n\n"
+                )
+            
+            msg += (
+                f"\U0001f4c8 *RESUMO:*\n"
+                f"\u2705 Greens: {greens}\n"
+                f"\u274c Reds: {reds}\n"
+                f"\U0001f4b0 ROI: {roi_total:+.2f}u\n"
+            )
+            
+            await self.notifier.send_message(msg)
+            logger.info(f"Resumo de resultados enviado: {greens}G/{reds}R {roi_total:+.2f}u")
+        
+        except Exception as e:
+            logger.error(f"Erro ao enviar resultados via WhatsApp: {e}")
+
     async def _check_daily_summary(self):
         """Verifica se deve enviar resumo diario via WhatsApp."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         try:
             summary_time = datetime.strptime(DAILY_SUMMARY_TIME, "%H:%M").time()
@@ -460,6 +837,91 @@ class CornerPressureElite:
             await self.notifier.send_daily_summary(stats)
             self._last_summary_date = now.date()
             logger.info("Resumo diario enviado")
+
+    async def _check_upcoming_notifications(self):
+        """Envia notificacoes de agenda: resumo matinal e alertas pre-jogo."""
+        now = datetime.now(timezone.utc)
+
+        # Reset alertas a meia-noite
+        if now.hour == 0 and now.minute < 5:
+            self._pre_game_alerted.clear()
+
+        # 1. Resumo matinal
+        try:
+            notif_time = datetime.strptime(UPCOMING_NOTIFICATION_TIME, "%H:%M").time()
+        except ValueError:
+            notif_time = datetime.strptime("08:00", "%H:%M").time()
+
+        if (
+            now.time() >= notif_time
+            and self._last_morning_msg_date != now.date()
+            and self._today_schedule
+        ):
+            # Formatar jogos para a notificacao
+            games = self._get_upcoming_games_list()
+            if games:
+                await self.notifier.send_upcoming_games(games)
+                logger.info(f"Agenda matinal enviada: {len(games)} jogos")
+            self._last_morning_msg_date = now.date()
+
+        # 2. Alerta pre-jogo (jogos comecando em <= PRE_GAME_ALERT_MINUTES)
+        games_soon = []
+        for f in self._today_schedule:
+            ts = f.get("fixture", {}).get("timestamp", 0)
+            if not ts or ts in self._pre_game_alerted:
+                continue
+            game_start = datetime.fromtimestamp(ts, tz=timezone.utc)
+            mins_until = (game_start - now).total_seconds() / 60
+            if 0 < mins_until <= PRE_GAME_ALERT_MINUTES:
+                teams = f.get("teams", {})
+                league = f.get("league", {})
+                games_soon.append({
+                    "hora_inicio": game_start.astimezone().strftime("%H:%M"),
+                    "home": teams.get("home", {}).get("name", "?"),
+                    "away": teams.get("away", {}).get("name", "?"),
+                    "liga": league.get("name", "?"),
+                    "minutos_ate": int(mins_until),
+                    "timestamp": ts,
+                })
+                self._pre_game_alerted.add(ts)
+
+        if games_soon:
+            await self.notifier.send_pre_game_alert(games_soon)
+            logger.info(f"Alerta pre-jogo enviado: {len(games_soon)} jogos")
+
+    def _get_upcoming_games_list(self) -> list:
+        """Converte _today_schedule para lista formatada de jogos."""
+        now = datetime.now(timezone.utc)
+        games = []
+        for f in self._today_schedule:
+            ts = f.get("fixture", {}).get("timestamp", 0)
+            if not ts:
+                continue
+            game_start = datetime.fromtimestamp(ts, tz=timezone.utc)
+            teams = f.get("teams", {})
+            league = f.get("league", {})
+            
+            # Pula jogos + 105 min (finalizados)
+            if now > game_start + timedelta(minutes=105):
+                continue
+            
+            # Pula jogos no passado (erro de timezone/API)
+            if (game_start - now).total_seconds() / 60 < -60:
+                continue
+            
+            mins_until = max(0, int((game_start - now).total_seconds() / 60))
+            status_short = f.get("fixture", {}).get("status", {}).get("short", "NS")
+            games.append({
+                "hora_inicio": game_start.astimezone().strftime("%H:%M"),
+                "home": teams.get("home", {}).get("name", "?"),
+                "away": teams.get("away", {}).get("name", "?"),
+                "liga": league.get("name", "?"),
+                "minutos_ate": mins_until,
+                "timestamp": ts,
+                "status": status_short,
+            })
+        games.sort(key=lambda x: x["timestamp"])
+        return games
 
     async def _send_startup_status(self):
         """Envia status ao iniciar sistema via WhatsApp."""

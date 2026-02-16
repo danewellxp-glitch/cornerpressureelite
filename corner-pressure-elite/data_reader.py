@@ -6,6 +6,7 @@ Usado por monitor.py (terminal) e api_server.py (API web).
 import json
 import os
 import sqlite3
+import time
 from datetime import datetime
 
 from config import API_DAILY_LIMIT, DB_PATH
@@ -74,7 +75,7 @@ def get_recent_signals(limit: int = 5) -> list:
         cur = conn.cursor()
         cur.execute(
             "SELECT timestamp, jogo_descricao, tipo_sinal, pressure_score, "
-            "projecao, edge, linha, resultado FROM sinais "
+            "projecao, edge, linha, odd, resultado, escanteios_final FROM sinais "
             "ORDER BY id DESC LIMIT ?",
             (limit,),
         )
@@ -144,6 +145,8 @@ def parse_log_for_status(lines: list) -> dict:
 
 
 LIVE_STATE_PATH = os.path.join(os.path.dirname(__file__), "data", "live_state.json")
+UPCOMING_GAMES_PATH = os.path.join(os.path.dirname(__file__), "data", "upcoming_games.json")
+AUDIT_STATE_PATH = os.path.join(os.path.dirname(__file__), "data", "audit_state.json")
 
 
 def get_live_state() -> dict:
@@ -162,3 +165,110 @@ def get_live_state() -> dict:
         "pos_janela": [],
         "ids_observados": [],
     }
+
+
+def get_upcoming_games() -> dict:
+    """Retorna próximos jogos programados com minutos_ate recalculado em tempo real."""
+    try:
+        if os.path.exists(UPCOMING_GAMES_PATH):
+            with open(UPCOMING_GAMES_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            now = time.time()
+            proximos = []
+            for game in data.get("proximos", []):
+                ts = game.get("timestamp", 0)
+                if not ts:
+                    continue
+                # Pula jogos ja terminados (estimativa 105 min = 6300 seg)
+                if ts + 6300 < now:
+                    continue
+                # Recalcula minutos_ate em tempo real
+                game["minutos_ate"] = max(0, int((ts - now) / 60))
+                proximos.append(game)
+
+            return {
+                "atualizado": datetime.now().isoformat(),
+                "proximos": proximos,
+            }
+    except Exception:
+        pass
+    return {
+        "atualizado": None,
+        "proximos": [],
+    }
+
+
+def get_audit_state() -> dict:
+    """Retorna dados de auditoria do último ciclo de análise."""
+    try:
+        if os.path.exists(AUDIT_STATE_PATH):
+            with open(AUDIT_STATE_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {
+        "atualizado": None,
+        "ciclo": 0,
+        "funil": {
+            "total_analisados": 0,
+            "passou_filtros": 0,
+            "score_ok": 0,
+            "edge_ok": 0,
+            "sinais_emitidos": 0,
+            "premium": 0,
+            "normal": 0,
+        },
+        "filtros_breakdown": {},
+        "jogos": [],
+        "taxas": {
+            "elegibilidade": 0,
+            "conversao_score": 0,
+            "conversao_edge": 0,
+            "hit_rate": 0,
+        },
+    }
+
+
+def get_signals_history(days: int = 7) -> list:
+    """Retorna contagem de sinais por dia nos últimos N dias."""
+    db_path = DB_PATH
+    if not os.path.exists(db_path):
+        return []
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                date(timestamp) as dia,
+                COUNT(*) as total,
+                SUM(CASE WHEN tipo_sinal = 'PREMIUM' THEN 1 ELSE 0 END) as premium,
+                SUM(CASE WHEN tipo_sinal = 'NORMAL' THEN 1 ELSE 0 END) as normal,
+                SUM(CASE WHEN resultado = 'GREEN' THEN 1 ELSE 0 END) as greens,
+                SUM(CASE WHEN resultado = 'RED' THEN 1 ELSE 0 END) as reds,
+                COALESCE(SUM(roi), 0) as roi
+            FROM sinais
+            WHERE timestamp >= date('now', ?)
+            GROUP BY date(timestamp)
+            ORDER BY dia DESC
+            """,
+            (f"-{days} days",),
+        )
+        rows = cur.fetchall()
+        conn.close()
+        return [
+            {
+                "dia": r[0],
+                "total": r[1],
+                "premium": r[2],
+                "normal": r[3],
+                "greens": r[4],
+                "reds": r[5],
+                "roi": round(r[6], 2),
+            }
+            for r in rows
+        ]
+    except Exception:
+        return []

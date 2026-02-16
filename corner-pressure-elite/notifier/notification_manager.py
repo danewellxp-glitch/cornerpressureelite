@@ -112,6 +112,41 @@ class NotificationManager:
             logger.error(f"Erro ao enviar resumo: {e}")
             return False
 
+    # --- Mensagem generica (grupo + updates) ---
+
+    async def send_message(self, message: str) -> bool:
+        """Envia mensagem generica para o grupo e updates."""
+        try:
+            success = await self._send_to_group(message)
+            await self._send_to_updates(message)
+            return success
+        except Exception as e:
+            logger.error(f"Erro ao enviar mensagem: {e}")
+            return False
+
+    async def send_upcoming_games(self, games: list) -> bool:
+        """Envia agenda de proximos jogos para grupo + admin + updates."""
+        try:
+            message = self.formatter.format_upcoming_games(games)
+            success = await self._send_to_group(message)
+            await self._send_to_updates(message)
+            await self._send_to_admin(message)
+            return success
+        except Exception as e:
+            logger.error(f"Erro ao enviar proximos jogos: {e}")
+            return False
+
+    async def send_pre_game_alert(self, games: list) -> bool:
+        """Envia alerta de jogos prestes a comecar."""
+        try:
+            message = self.formatter.format_pre_game_alert(games)
+            success = await self._send_to_group(message)
+            await self._send_to_updates(message)
+            return success
+        except Exception as e:
+            logger.error(f"Erro ao enviar alerta pre-jogo: {e}")
+            return False
+
     # --- Erros e status (vao para o ADMIN + UPDATES) ---
 
     async def send_error_alert(self, error_message: str) -> bool:

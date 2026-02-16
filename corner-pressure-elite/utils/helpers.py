@@ -34,11 +34,16 @@ def extrair_estatistica(stats: List[Dict], team_index: int, stat_type: str) -> O
 
 
 def parse_fixture_to_jogo(fixture: Dict, stats: List[Dict], liga_id: int) -> JogoAoVivo:
-    """Converte dados da API em JogoAoVivo."""
+    """Converte dados da API em JogoAoVivo.
+
+    NOTA: A API-Football retorna estatísticas TOTAIS do jogo, não janelas de tempo.
+    Os campos escanteios_ultimos_5min e escanteios_ultimos_10min são ESTIMADOS
+    a partir da taxa de escanteios/minuto (corner rate).
+    Os campos ataques_perigosos e finalizacoes são totais do jogo.
+    """
     fixture_info = fixture.get("fixture", {})
     teams = fixture.get("teams", {})
     goals = fixture.get("goals", {})
-    score_data = fixture.get("score", {})
 
     # Minuto atual
     status = fixture_info.get("status", {})
@@ -48,18 +53,41 @@ def parse_fixture_to_jogo(fixture: Dict, stats: List[Dict], liga_id: int) -> Jog
     # Escanteios de cada time
     corners_home = _parse_int(extrair_estatistica(stats, 0, "Corner Kicks"))
     corners_away = _parse_int(extrair_estatistica(stats, 1, "Corner Kicks"))
+    total_corners = corners_home + corners_away
 
-    # Ataques perigosos
+    # Estimar escanteios em janelas de tempo a partir do corner rate.
+    # A API não fornece dados windowed — esta é a melhor aproximação disponível.
+    if minuto > 5:
+        corner_rate = total_corners / minuto  # corners por minuto
+        est_corners_5min = min(total_corners, max(0, round(corner_rate * 5 + 0.3)))
+        est_corners_10min = min(total_corners, max(0, round(corner_rate * 10 + 0.3)))
+    elif total_corners > 0:
+        # Inicio do jogo: se há escanteios, considerar recentes
+        est_corners_5min = min(total_corners, 2)
+        est_corners_10min = total_corners
+    else:
+        est_corners_5min = 0
+        est_corners_10min = 0
+
+    # Ataques perigosos (total do jogo)
     dangerous_home = _parse_int(extrair_estatistica(stats, 0, "Dangerous Attacks"))
     dangerous_away = _parse_int(extrair_estatistica(stats, 1, "Dangerous Attacks"))
 
-    # Posse de bola
+    # Posse de bola (% geral)
     possession_home = _parse_percentage(extrair_estatistica(stats, 0, "Ball Possession"))
     possession_away = _parse_percentage(extrair_estatistica(stats, 1, "Ball Possession"))
 
-    # Finalizacoes
+    # Finalizacoes (total do jogo)
     shots_home = _parse_int(extrair_estatistica(stats, 0, "Shots on Goal"))
     shots_away = _parse_int(extrair_estatistica(stats, 1, "Shots on Goal"))
+
+    desc = f"{teams.get('home', {}).get('name', '???')} vs {teams.get('away', {}).get('name', '???')}"
+    logger.debug(
+        f"[PARSE] {desc} min={minuto} | "
+        f"corners={total_corners} (H:{corners_home} A:{corners_away}) | "
+        f"est_5min={est_corners_5min} est_10min={est_corners_10min} | "
+        f"rate={total_corners/max(1,minuto):.3f}/min"
+    )
 
     return JogoAoVivo(
         id=fixture_info.get("id", 0),
@@ -70,9 +98,11 @@ def parse_fixture_to_jogo(fixture: Dict, stats: List[Dict], liga_id: int) -> Jog
         placar_casa=goals.get("home", 0) or 0,
         placar_fora=goals.get("away", 0) or 0,
         minuto=minuto,
-        escanteios_total=corners_home + corners_away,
+        escanteios_total=total_corners,
         escanteios_casa=corners_home,
         escanteios_fora=corners_away,
+        escanteios_ultimos_10min=est_corners_10min,
+        escanteios_ultimos_5min=est_corners_5min,
         ataques_perigosos_ultimos_10min=dangerous_home + dangerous_away,
         posse_ultimos_10min=max(possession_home, possession_away),
         finalizacoes_recentes=shots_home + shots_away,
