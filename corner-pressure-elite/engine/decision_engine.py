@@ -6,18 +6,19 @@ from collections import defaultdict
 from data.models import JogoAoVivo, Sinal
 from engine.score_engine import PressureScoreEngine
 from engine.projection_engine import ProjectionEngine
+from engine.strategy_config import (
+    StrategyTier,
+    CornerStrategy,
+    get_corner_strategy,
+    DEFAULT_CORNER_STRATEGY,
+    CORNER_STRATEGIES,
+    compute_matching_tiers,
+)
 from config import (
     JANELA_ANTECIPADA_INICIO,
     MAX_DIFERENCA_GOLS,
     MAX_DIFERENCA_GOLS_1T,
-    MIN_ESCANTEIOS_TOTAL,
-    MIN_ESCANTEIOS_5MIN,
     MIN_ESCANTEIOS_JOGO_MORNO,
-    ESCANTEIOS_EARLY_WINDOW,
-    MIN_SCORE_NORMAL,
-    MIN_SCORE_PREMIUM,
-    MIN_EDGE_NORMAL,
-    MIN_EDGE_PREMIUM,
 )
 
 logger = logging.getLogger("CPES.DecisionEngine")
@@ -26,9 +27,10 @@ logger = logging.getLogger("CPES.DecisionEngine")
 class DecisionEngine:
     """Motor de decisao - Avalia se deve emitir sinal."""
 
-    def __init__(self):
+    def __init__(self, strategy: Optional[StrategyTier] = None):
         self.score_engine = PressureScoreEngine()
         self.projection_engine = ProjectionEngine()
+        self.strategy: CornerStrategy = get_corner_strategy(strategy)
         # Contadores de auditoria por ciclo
         self._ciclo_stats: Dict[str, int] = defaultdict(int)
         self._ciclo_filtros: Dict[str, int] = defaultdict(int)
@@ -97,11 +99,11 @@ class DecisionEngine:
         """Pre-avaliacao leve: filtros + score apenas. Sem auditoria.
         Retorna pressure score se o jogo passa, None se bloqueado.
         Usar para decidir se vale buscar odds (requisicao cara)."""
-        motivo = self._verificar_filtros(jogo)
+        motivo = self._verificar_filtros(jogo, self.strategy)
         if motivo:
             return None
         score = self.score_engine.calcular(jogo, log=False)
-        if score < MIN_SCORE_NORMAL:
+        if score < self.strategy.min_score:
             return None
         return score
 
@@ -146,7 +148,7 @@ class DecisionEngine:
         )
 
         # 1. Filtros estruturais
-        motivo_bloqueio = self._verificar_filtros(jogo)
+        motivo_bloqueio = self._verificar_filtros(jogo, self.strategy)
         if motivo_bloqueio:
             self._ciclo_filtros[motivo_bloqueio.split("(")[0].strip()] += 1
             logger.info(f"[ANALISE] ✗ BLOQUEADO: {jogo.descricao} | {motivo_bloqueio}")
@@ -160,14 +162,14 @@ class DecisionEngine:
         score = self.score_engine.calcular(jogo)
         game_audit["pressure_score"] = score
 
-        if score < MIN_SCORE_NORMAL:
+        if score < self.strategy.min_score:
             self._ciclo_filtros["Score insuficiente"] += 1
             logger.info(
                 f"[ANALISE] ✗ Score insuficiente: {jogo.descricao} | "
-                f"Score={score} < {MIN_SCORE_NORMAL}"
+                f"Score={score} < {self.strategy.min_score}"
             )
             game_audit["status"] = "SCORE_INSUFICIENTE"
-            game_audit["motivo"] = f"Score {score} < {MIN_SCORE_NORMAL}"
+            game_audit["motivo"] = f"Score {score} < {self.strategy.min_score}"
             self._ciclo_jogos.append(game_audit)
             return None
 
@@ -185,6 +187,17 @@ class DecisionEngine:
             self._ciclo_jogos.append(game_audit)
             return None
 
+        if jogo.linha_atual > self.strategy.max_linha_asianica:
+            self._ciclo_filtros["Linha asiatica muito alta"] += 1
+            logger.info(
+                f"[ANALISE] ✗ Linha muito alta: {jogo.descricao} | "
+                f"linha={jogo.linha_atual} > {self.strategy.max_linha_asianica}"
+            )
+            game_audit["status"] = "LINHA_MUITO_ALTA"
+            game_audit["motivo"] = f"Linha {jogo.linha_atual} > {self.strategy.max_linha_asianica}"
+            self._ciclo_jogos.append(game_audit)
+            return None
+
         # 4. Projecao hibrida
         projecao = self.projection_engine.calcular_projecao(jogo, score)
         game_audit["projecao"] = round(projecao, 2)
@@ -194,10 +207,11 @@ class DecisionEngine:
         game_audit["edge"] = edge
 
         # 6. Decisao
-        if score >= MIN_SCORE_PREMIUM and edge >= MIN_EDGE_PREMIUM:
+        if score >= self.strategy.premium_score and edge >= self.strategy.premium_edge:
             self._ciclo_stats["sinais"] += 1
             self._ciclo_stats["premium"] += 1
             self._ciclo_stats["edge_ok"] += 1
+            matching = compute_matching_tiers(score, edge, CORNER_STRATEGIES)
             sinal = Sinal(
                 tipo="PREMIUM",
                 jogo=jogo,
@@ -205,6 +219,7 @@ class DecisionEngine:
                 projecao=projecao,
                 edge=edge,
                 timestamp=datetime.now(),
+                matching_tiers=matching,
             )
             logger.info(
                 f"[ANALISE] ★ SINAL PREMIUM: {jogo.descricao} | "
@@ -214,10 +229,11 @@ class DecisionEngine:
             self._ciclo_jogos.append(game_audit)
             return sinal
 
-        elif score >= MIN_SCORE_NORMAL and edge >= MIN_EDGE_NORMAL:
+        elif score >= self.strategy.min_score and edge >= self.strategy.min_edge:
             self._ciclo_stats["sinais"] += 1
             self._ciclo_stats["normal"] += 1
             self._ciclo_stats["edge_ok"] += 1
+            matching = compute_matching_tiers(score, edge, CORNER_STRATEGIES)
             sinal = Sinal(
                 tipo="NORMAL",
                 jogo=jogo,
@@ -225,6 +241,7 @@ class DecisionEngine:
                 projecao=projecao,
                 edge=edge,
                 timestamp=datetime.now(),
+                matching_tiers=matching,
             )
             logger.info(
                 f"[ANALISE] ● SINAL NORMAL: {jogo.descricao} | "
@@ -237,20 +254,20 @@ class DecisionEngine:
         self._ciclo_filtros["Edge insuficiente"] += 1
         logger.info(
             f"[ANALISE] ✗ Edge insuficiente: {jogo.descricao} | "
-            f"Score={score} Edge={edge:+.2f} (min={MIN_EDGE_NORMAL}) "
+            f"Score={score} Edge={edge:+.2f} (min={self.strategy.min_edge}) "
             f"Proj={projecao:.1f} Linha={jogo.linha_atual}"
         )
         game_audit["status"] = "EDGE_INSUFICIENTE"
-        game_audit["motivo"] = f"Edge {edge:+.2f} < {MIN_EDGE_NORMAL}"
+        game_audit["motivo"] = f"Edge {edge:+.2f} < {self.strategy.min_edge}"
         self._ciclo_jogos.append(game_audit)
         return None
 
     @staticmethod
-    def _verificar_filtros(jogo: JogoAoVivo) -> Optional[str]:
+    def _verificar_filtros(jogo: JogoAoVivo, strategy: CornerStrategy) -> Optional[str]:
         """Retorna motivo do bloqueio ou None se passou."""
 
-        # Janela de monitoramento: min 50+ OU early window (7+ escanteios em qualquer minuto)
-        early_window = jogo.escanteios_total >= ESCANTEIOS_EARLY_WINDOW
+        # Janela de monitoramento: min 50+ OU early window (strategy-dependent)
+        early_window = jogo.escanteios_total >= strategy.early_window_escanteios
         if jogo.minuto < JANELA_ANTECIPADA_INICIO and not early_window:
             return f"Fora da janela (min {jogo.minuto} < {JANELA_ANTECIPADA_INICIO})"
 
@@ -262,13 +279,13 @@ class DecisionEngine:
         if jogo.diferenca_gols > MAX_DIFERENCA_GOLS:
             return f"Diferenca de gols alta ({jogo.diferenca_gols} > {MAX_DIFERENCA_GOLS})"
 
-        # Minimo de escanteios
-        if jogo.escanteios_total < MIN_ESCANTEIOS_TOTAL:
-            return f"Poucos escanteios ({jogo.escanteios_total} < {MIN_ESCANTEIOS_TOTAL})"
+        # Minimo de escanteios (strategy-dependent)
+        if jogo.escanteios_total < strategy.min_escanteios_total:
+            return f"Poucos escanteios ({jogo.escanteios_total} < {strategy.min_escanteios_total})"
 
-        # Escanteio recente (estimado via corner rate)
-        if jogo.escanteios_ultimos_5min < MIN_ESCANTEIOS_5MIN:
-            return f"Sem escanteio recente (est_5min={jogo.escanteios_ultimos_5min} < {MIN_ESCANTEIOS_5MIN})"
+        # Escanteio recente (strategy-dependent)
+        if jogo.escanteios_ultimos_5min < strategy.min_escanteios_5min:
+            return f"Sem escanteio recente (est_5min={jogo.escanteios_ultimos_5min} < {strategy.min_escanteios_5min})"
 
         # Jogo morno (0x0 depois do min 60)
         if (

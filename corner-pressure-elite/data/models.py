@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -20,6 +20,8 @@ class JogoAoVivo:
     # Mercado
     linha_atual: float = 0.0
     odd_atual: float = 0.0
+    odd_betano: float = 0.0   # Betano (bookmaker 46)
+    odd_bet365: float = 0.0   # Bet365 (bookmaker 8)
 
     # Estatisticas recentes (ultimos 10 min)
     escanteios_ultimos_10min: int = 0
@@ -30,6 +32,22 @@ class JogoAoVivo:
 
     # Historico
     media_historica_combinada: float = 0.0
+
+    # --- Cartoes ---
+    cartoes_amarelos_total: int = 0
+    cartoes_amarelos_casa: int = 0
+    cartoes_amarelos_fora: int = 0
+    cartoes_vermelhos_total: int = 0
+    cartoes_vermelhos_casa: int = 0
+    cartoes_vermelhos_fora: int = 0
+    cartoes_ultimos_5min: int = 0
+    cartoes_ultimos_10min: int = 0
+    faltas_total: int = 0
+    faltas_casa: int = 0
+    faltas_fora: int = 0
+    linha_cartoes: float = 0.0
+    odd_cartoes: float = 0.0
+    media_historica_cartoes: float = 0.0
 
     @property
     def descricao(self) -> str:
@@ -53,10 +71,31 @@ class Sinal:
     edge: float
     timestamp: datetime = field(default_factory=datetime.now)
     reavaliacao: bool = False
+    matching_tiers: List[str] = field(default_factory=list)
 
     # Dados do momento do primeiro alerta (para re-avaliacao)
     primeiro_minuto: Optional[int] = None
     primeiro_escanteios: Optional[int] = None
+    primeiro_linha: Optional[float] = None
+    primeiro_projecao: Optional[float] = None
+    primeiro_edge: Optional[float] = None
+    primeiro_score: Optional[int] = None
+
+
+@dataclass
+class SinalCartoes:
+    tipo: str  # 'NORMAL' ou 'PREMIUM'
+    jogo: JogoAoVivo
+    tension_score: int
+    projecao_cartoes: float
+    edge: float
+    timestamp: datetime = field(default_factory=datetime.now)
+    reavaliacao: bool = False
+    matching_tiers: List[str] = field(default_factory=list)
+
+    # Dados do momento do primeiro alerta
+    primeiro_minuto: Optional[int] = None
+    primeiro_cartoes: Optional[int] = None
     primeiro_linha: Optional[float] = None
     primeiro_projecao: Optional[float] = None
     primeiro_edge: Optional[float] = None
@@ -84,6 +123,7 @@ class RegistroSinal:
     resultado: Optional[str] = None
     escanteios_final: Optional[int] = None
     roi: Optional[float] = None
+    tipo_analise: str = "ESCANTEIOS"
 
 
 @dataclass
@@ -126,3 +166,43 @@ class ResultadoJogo:
     resultado: Optional[str] = None  # 'GREEN', 'RED', None
     escanteios_final: Optional[int] = None
     roi: Optional[float] = None
+
+
+@dataclass
+class User:
+    id: Optional[int] = None
+    email: str = ""
+    password_hash: str = ""
+    full_name: str = ""
+    whatsapp: str = ""
+    cpf: str = ""
+    role: str = "user"  # 'user', 'admin'
+    is_verified: bool = False
+    verification_code: Optional[str] = None
+    verification_expires_at: Optional[datetime] = None
+    verification_attempts: int = 0
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class Subscription:
+    id: Optional[int] = None
+    user_id: int = 0
+    plan: str = "basic"  # 'basic', 'max' (or 'pro')
+    asaas_id: str = ""
+    status: str = "pending"  # 'pending', 'active', 'overdue', 'canceled'
+    starts_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    next_due_date: Optional[datetime] = None
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class UserStrategyPreference:
+    id: Optional[int] = None
+    user_id: int = 0
+    corners_strategy: str = "moderate"  # conservative, moderate, aggressive, brute
+    cards_strategy: str = "moderate"
+    updated_at: datetime = field(default_factory=datetime.now)
+
