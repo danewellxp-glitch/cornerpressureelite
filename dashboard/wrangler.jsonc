@@ -24,7 +24,7 @@
   },
   // Defina CPES_API_URL no Cloudflare Dashboard se usar Workers
   // Workers & Pages → corner-pressure-dashboard → Settings → Environment variables
-  // Domínio: adicione odontoschultz.online no Cloudflare Dashboard após o deploy
+  // Domínio: adicione iqpressure.online no Cloudflare Dashboard após o deploy
   // Workers & Pages → corner-pressure-dashboard → Settings → Domains & Routes
 }
 

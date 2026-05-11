@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "PressureIQ - Inteligência de Pressão de Jogo",
   description: "Sistema avançado de análise de escanteios e cartões com IA",
-  metadataBase: new URL("https://odontoschultz.online"),
+  metadataBase: new URL("https://iqpressure.online"),
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "any" },
