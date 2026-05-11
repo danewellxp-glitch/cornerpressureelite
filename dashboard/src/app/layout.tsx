@@ -1,37 +1,33 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "CPES Dashboard",
-  description: "Corner Pressure Elite System - Dashboard em tempo real",
+  title: "PressureIQ - Inteligência de Pressão de Jogo",
+  description: "Sistema avançado de análise de escanteios e cartões com IA",
+  metadataBase: new URL("https://odontoschultz.online"),
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/brand/logo-mark.png", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
+  openGraph: {
+    title: "PressureIQ — Corner & Card Pressure Elite",
+    description: "Sinais ao vivo de escanteios e cartões com IA, direto no WhatsApp.",
+    images: [
+      { url: "/brand/og-image.png", width: 1200, height: 630, alt: "PressureIQ" },
+    ],
+    type: "website",
+  },
 };
 
-// Desabilitar caching static para páginas dinâmicas
-export const revalidate = 0;
-
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#0a0a0a] text-white`}
-      >
-        {children}
-      </body>
+    <html lang="pt-BR">
+      <body>{children}</body>
     </html>
   );
 }
