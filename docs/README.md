@@ -30,7 +30,7 @@
 | Doc | Descrição |
 |---|---|
 | [architecture/full-spec-v2-waha.md](architecture/full-spec-v2-waha.md) | Especificação técnica original (WAHA + engine) |
-| [architecture/sistema-completo.md](architecture/sistema-completo.md) | Visão geral integrada |
+| [architecture/sistema-completo.md](architecture/sistema-completo.md) | **Referência canônica ponta-a-ponta** — call chains, schema, odds pipeline, plano Betano scraping (atualizado 2026-05-12) |
 | [architecture/upcoming-games-polling.md](architecture/upcoming-games-polling.md) | Polling adaptativo |
 | [architecture/waha-webhook-architecture.md](architecture/waha-webhook-architecture.md) | Webhook PUSH do WAHA Plus |
 | [api/ENDPOINTS.md](api/ENDPOINTS.md) | Referência da API REST |
@@ -71,6 +71,7 @@
 | [sprints/2026-05-11-robo-fase-4-bankroll-ml.md](sprints/2026-05-11-robo-fase-4-bankroll-ml.md) | Robô Fase 4 — Bankroll, Cashout matemático, ML de qualidade |
 | [sprints/2026-05-11-robo-ux-dashboard.md](sprints/2026-05-11-robo-ux-dashboard.md) | Robô UX — gate MAX-only, sidebar, wizard de setup, telas, animações, a11y |
 | [sprints/2026-05-11-migracao-dominio-iqpressure.md](sprints/2026-05-11-migracao-dominio-iqpressure.md) | Harness passo a passo da migração `odontoschultz.online` → `iqpressure.online` (Hostinger, Cloudflare Tunnel, Resend, Asaas, CORS) |
+| [sprints/2026-05-12-landing-page-apex.md](sprints/2026-05-12-landing-page-apex.md) | Landing page pública no apex `iqpressure.online/` (hero, features, pricing, CTA). Middleware host-aware pra `membros.*` redirecionar pro login. |
 
 ---
 
