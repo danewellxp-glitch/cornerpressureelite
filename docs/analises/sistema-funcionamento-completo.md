@@ -4,6 +4,8 @@
 **Versão:** 2.0 (Com WAHA, Dashboard, API)  
 **Status:** Ativo em Produção
 
+> **Nota (2026-05-11):** o domínio público foi migrado de `odontoschultz.online` para `iqpressure.online`. Referências ao domínio antigo neste doc refletem o estado anterior à migração. Topologia atual em `CLAUDE.md` §9; mudança detalhada em `docs/changelog/2026-05-11-migracao-dominio-iqpressure.md`.
+
 ---
 
 ## 1. Visão Geral

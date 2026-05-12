@@ -120,9 +120,9 @@ Todos os containers compartilham a rede `cpes-network`. O WAHA e acessado intern
 
 | URL | Servico |
 |-----|---------|
-| `https://odontoschultz.online` | Dashboard (Cloudflare Tunnel) |
-| `https://api.odontoschultz.online` | API FastAPI |
-| `ssh.odontoschultz.online` | SSH via Cloudflare Tunnel |
+| `https://iqpressure.online` | Dashboard (Cloudflare Tunnel) |
+| `https://api.iqpressure.online` | API FastAPI |
+| `ssh.iqpressure.online` | SSH via Cloudflare Tunnel |
 
 ### 3.4 Variaveis de Ambiente
 

@@ -334,7 +334,7 @@ Before going live:
 
 Once validated, monitor dashboard for live status:
 
-1. Open http://localhost:3001 (or https://odontoschultz.online)
+1. Open http://localhost:3001 (or https://iqpressure.online)
 2. Check **"System Health"** panel:
    - Games Live: Should increase during match hours
    - Last Update: Should be < 1 minute old

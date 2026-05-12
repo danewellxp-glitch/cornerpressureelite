@@ -4,6 +4,8 @@
 **Data:** 15/02/2026  
 **Tipo:** Documento de analise tecnica e funcional
 
+> **Nota (2026-05-11):** o dominio publico foi migrado de `odontoschultz.online` para `iqpressure.online`. Referencias ao dominio antigo neste doc refletem o estado anterior. Topologia atual em `CLAUDE.md` §9; ver tambem `docs/changelog/2026-05-11-migracao-dominio-iqpressure.md`.
+
 ---
 
 ## 1. Resumo Executivo

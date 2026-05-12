@@ -45,13 +45,13 @@ sudo docker compose logs -f dashboard
 ### 3️⃣ Acessar
 
 - **Localhost**: http://localhost:3001
-- **Produção**: https://odontoschultz.online (após deploy Cloudflare)
+- **Produção**: https://iqpressure.online (após deploy Cloudflare)
 
 ---
 
 ## 🌐 Deploy em Produção (Cloudflare)
 
-### Para odontoschultz.online
+### Para iqpressure.online
 
 ```bash
 cd dashboard
@@ -71,8 +71,8 @@ Depois, no [Cloudflare Dashboard](https://dash.cloudflare.com/):
 1. **Workers & Pages** → **corner-pressure-dashboard**
 2. **Settings** → **Domains & Routes**
 3. Adicionar domínios:
-   - `odontoschultz.online`
-   - `www.odontoschultz.online`
+   - `iqpressure.online`
+   - `www.iqpressure.online`
 
 4. **Settings** → **Environment variables**
 5. Adicionar: `CPES_API_URL` = URL da API em produção

@@ -49,11 +49,11 @@ http://localhost:3001
 
 ---
 
-## 🌐 Deploy Cloudflare (odontoschultz.online)
+## 🌐 Deploy Cloudflare (iqpressure.online)
 
 ### Pré-requisitos
 
-- ✅ Cloudflare account com odontoschultz.online
+- ✅ Cloudflare account com iqpressure.online
 - ✅ Wrangler CLI (`npm install -g wrangler`)
 - ✅ Cloudflare API Token
 
@@ -82,8 +82,8 @@ No Cloudflare Dashboard:
 1. Vá para **Workers & Pages** → **corner-pressure-dashboard**
 2. **Settings** → **Domains & Routes**
 3. Adicione:
-   - `odontoschultz.online`
-   - `www.odontoschultz.online`
+   - `iqpressure.online`
+   - `www.iqpressure.online`
 
 ### 5. Configurar Variáveis de Ambiente
 
@@ -91,15 +91,15 @@ No Cloudflare Dashboard:
 1. **Settings** → **Environment variables**
 2. Adicione:
    - `NEXTJS_ENV` = `production`
-   - `CPES_API_URL` = `https://api.odontoschultz.online` (ou onde sua API estiver)
+   - `CPES_API_URL` = `https://api.iqpressure.online` (ou onde sua API estiver)
 
 > **Nota:** A API precisa estar acessível de fora (Railway, Render, etc.) ou via Cloudflare Tunnel.
 
 ### 6. Acessar
 
 ```
-https://odontoschultz.online
-https://www.odontoschultz.online
+https://iqpressure.online
+https://www.iqpressure.online
 ```
 
 ---
@@ -147,7 +147,7 @@ sudo docker-compose up -d
 1. **Testar Localhost**: http://localhost:3001
 2. **Verificar dados em tempo real**: Jogos, sinais, status
 3. **Deploy Cloudflare**: Seguir seção acima
-4. **Pedir testes em produção**: https://odontoschultz.online
+4. **Pedir testes em produção**: https://iqpressure.online
 
 ---
 

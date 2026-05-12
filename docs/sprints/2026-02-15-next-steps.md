@@ -4,6 +4,8 @@
 **System Status**: ✅ Fixed & Ready for Testing  
 **Your Action Required**: Proceed with validation below
 
+> **Note (2026-05-11):** the production domain was migrated from `odontoschultz.online` to `iqpressure.online`. References to the old domain in this doc reflect the previous state. See `docs/changelog/2026-05-11-migracao-dominio-iqpressure.md`.
+
 ---
 
 ## Immediate Actions (Next 15 minutes)

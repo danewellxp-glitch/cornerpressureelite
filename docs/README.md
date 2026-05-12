@@ -78,6 +78,7 @@
 
 | Data | Mudança |
 |---|---|
+| [2026-05-11-migracao-dominio-iqpressure.md](changelog/2026-05-11-migracao-dominio-iqpressure.md) | Migração de domínio público: `odontoschultz.online` → `iqpressure.online` (apex agora serve dashboard; WAHA em `wa.`) |
 | [2026-05-11-fluxo-compra-pre-golive.md](changelog/2026-05-11-fluxo-compra-pre-golive.md) | Fluxo de compra: refund, dedup de webhooks, checkout idempotente, UX pós-verify |
 | [2026-05-10-adapter-permission-policy-claude-local.md](changelog/2026-05-10-adapter-permission-policy-claude-local.md) | Política de permissão migrou do adapter para o harness (PREA-22/23) |
 | [2026-05-10-waha-healthcheck-periodico.md](changelog/2026-05-10-waha-healthcheck-periodico.md) | Healthcheck WAHA periódico + alerta admin |

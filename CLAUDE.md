@@ -268,17 +268,20 @@ Topologia real do tunnel (`~/.cloudflared/config.yml`, tunnel `ssh-tunnel` id `b
 
 | Hostname | Origem local | Serviço |
 |---|---|---|
-| `odontoschultz.online` / `www.` | `http://localhost:3000` | WAHA Plus (gateway WhatsApp) |
-| `membros.odontoschultz.online` | `http://localhost:3001` | Dashboard Next.js (PressureIQ) |
-| `api.odontoschultz.online` | `http://localhost:8000` | API FastAPI (CPES) |
-| `ssh.odontoschultz.online` | `ssh://localhost:22` | SSH |
+| `iqpressure.online` / `www.` | `http://localhost:3001` | Dashboard Next.js (site principal) |
+| `membros.iqpressure.online` | `http://localhost:3001` | Dashboard — área de membros |
+| `api.iqpressure.online` | `http://localhost:8000` | API FastAPI (CPES) |
+| `wa.iqpressure.online` | `http://localhost:3000` | WAHA Plus (gateway WhatsApp) |
+| `ssh.iqpressure.online` | `ssh://localhost:22` | SSH |
+
+> **Migração 2026-05-11:** o domínio público foi trocado de `odontoschultz.online` (legado, herança do consultório) para `iqpressure.online`. Os hostnames legados ainda estão no `config.yml` e no CORS durante a janela de transição (remoção planejada após 72h verde). Ver `docs/sprints/2026-05-11-migracao-dominio-iqpressure.md` e `docs/changelog/2026-05-11-migracao-dominio-iqpressure.md`.
 
 Endpoints externos consumidos:
 - `https://v3.football.api-sports.io` — API-Football v3 (`API_FOOTBALL_KEY`)
-- `https://sandbox.asaas.com/api/v3` — Asaas SANDBOX (`ASAAS_API_KEY`, `ASAAS_WALLET_ID`). Em produção: `https://api.asaas.com/v3`.
-- `https://api.resend.com` — Resend (`RESEND_API_KEY`). Domínio `odontoschultz.online` verificado; `EMAIL_FROM=no-reply@odontoschultz.online`.
+- `https://sandbox.asaas.com/api/v3` — Asaas SANDBOX (`ASAAS_API_KEY`, `ASAAS_WALLET_ID`). Em produção: `https://api.asaas.com/v3`. Webhook: `https://api.iqpressure.online/api/webhook/asaas` (validado pelo header `asaas-access-token` = `ASAAS_WEBHOOK_TOKEN`). O domínio do site precisa estar cadastrado em **Minha Conta → Dados Comerciais → Site** no painel Asaas — sem isso, criação de subscription retorna 400.
+- `https://api.resend.com` — Resend (`RESEND_API_KEY`). Domínio `iqpressure.online` verificado (region `sa-east-1`); `EMAIL_FROM=PressureIQ <no-reply@iqpressure.online>`. Registros DNS (MX/SPF/DKIM) ficam em `send.iqpressure.online` e `resend._domainkey.iqpressure.online` — todos **DNS only** no Cloudflare.
 
-Para apontar um subdomínio novo para o tunnel: `cloudflared tunnel route dns ssh-tunnel <sub>.odontoschultz.online` (adicione `--overwrite-dns` se já existir DNS quebrado).
+Para apontar um subdomínio novo para o tunnel: `cloudflared tunnel route dns ssh-tunnel <sub>.iqpressure.online` (adicione `--overwrite-dns` se já existir DNS quebrado). Se o cert.pem do `cloudflared` não cobrir a zona alvo, rode `cloudflared tunnel login` antes (interativo, OAuth) e marque a zona certa.
 
 ---
 
