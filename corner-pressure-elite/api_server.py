@@ -89,9 +89,6 @@ app.add_middleware(
         "https://iqpressure.online",
         "https://www.iqpressure.online",
         "https://membros.iqpressure.online",
-        "https://odontoschultz.online",
-        "https://www.odontoschultz.online",
-        "https://membros.odontoschultz.online",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -726,6 +723,22 @@ async def api_set_dev_mode(
     current.update(updates)
     await db.upsert_state("dev_mode_config", current)
     return {"status": "updated", "config": current}
+
+
+@app.post("/api/dev/asaas/approve/{payment_id}")
+async def api_dev_asaas_approve(
+    payment_id: str,
+    _: User = Depends(require_admin),
+):
+    """Aprova manualmente uma cobranca Asaas em AWAITING_RISK_ANALYSIS.
+
+    Util no sandbox para nao precisar abrir o painel a cada compra de teste.
+    """
+    asaas = AsaasClient()
+    ok = await asaas.approve_by_risk_analysis(payment_id)
+    if not ok:
+        raise HTTPException(status_code=502, detail="Asaas nao aprovou a cobranca")
+    return {"status": "approved", "payment_id": payment_id}
 
 
 @app.get("/api/audit")
@@ -1698,6 +1711,18 @@ async def webhook_asaas(request: Request):
         if not is_new:
             logger.info(f"[WEBHOOK ASAAS] Ignorando duplicado: {event} payment={payment_id} (grupo {group} já processado)")
             return {"status": "ignored", "reason": "duplicate"}
+
+    # Sandbox: aprova automaticamente cobrancas seguras pelo antifraude.
+    # Em producao (api.asaas.com) este branch nao dispara — o fluxo normal de
+    # risk analysis manual prevalece. Asaas reemite PAYMENT_CONFIRMED apos approve.
+    if event == "PAYMENT_AWAITING_RISK_ANALYSIS":
+        from config import ASAAS_API_URL
+        is_sandbox = "sandbox" in ASAAS_API_URL.lower()
+        if is_sandbox and payment_id:
+            ok = await AsaasClient().approve_by_risk_analysis(payment_id)
+            logger.info(f"[WEBHOOK ASAAS] Auto-approve sandbox payment={payment_id} ok={ok}")
+            return {"status": "auto-approved" if ok else "auto-approve-failed", "payment_id": payment_id}
+        return {"status": "ignored", "reason": "awaiting risk analysis (prod mode)"}
 
     if event in ["PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"]:
         # Renovação = já existia uma assinatura active deste user
