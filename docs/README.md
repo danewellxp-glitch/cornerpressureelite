@@ -1,96 +1,127 @@
-# CPES Documentation
+# PressureIQ / CPES — Documentação
 
-> Corner Pressure Elite System — Indice de Documentacao
-
----
-
-## Architecture
-
-Especificacoes tecnicas completas do sistema.
-
-| Documento | Descricao |
-|-----------|-----------|
-| [**Sistema Completo**](architecture/sistema-completo.md) | Documentacao completa e atualizada: stack, infra, engines, filtros, formulas, dashboard, WhatsApp, banco, backtest, parametros |
-| [Full Spec V2 — WAHA](architecture/full-spec-v2-waha.md) | Especificacao tecnica completa com integracao WhatsApp/WAHA |
-| [Full Spec V1](architecture/full-spec-v1.md) | Especificacao tecnica original (pre-WAHA) |
-| [Upcoming Games Polling](architecture/upcoming-games-polling.md) | Sistema inteligente de polling adaptativo para proximos jogos |
-
-## Analises
-
-Analises de componentes, modelos de decisao, estudos, debugging do sistema.
-
-| Documento | Descricao |
-|-----------|-----------|
-| [📍 Resumo Executivo - Debug](analises/resumo-executivo-debug.md) | Leia PRIMEIRO: diagnóstico em 2 min, bugs identificados, cronograma de 30min para fix |
-| [DEBUG CRÍTICO - Agenda Apenas Argentina](analises/debug-agenda-argentina.md) | Análise profunda: 5 bugs identificados, 3 problemas arquiteturais, timeline completa, testes propostos, correções |
-| [Checklist DEBUG Rápido](analises/checklist-debug-agranda.md) | Quick diagnosis em 5 min, testes imediatos, correções prioritizadas, checklist de produção |
-| [Testes Manuais - Agenda](analises/testes-manuais-agenda.md) | 7 testes passo a passo runáveis agora, matriz de diagnóstico, interpretar resultados |
-| [Sistema - Funcionamento Completo](analises/sistema-funcionamento-completo.md) | Documentacao completa: visao geral, arquitetura, componentes, fluxos, executacao, persistencia e troubleshooting |
-| [Analise Completa do Sistema](analises/analise-completa-sistema.md) | Analise tecnica e funcional completa: arquitetura, fluxos, componentes, limitacoes |
-| [Analise de Cobertura de Requisicoes](analises/analise-cobertura-requisicoes.md) | Analise de cobertura de requisicoes API-Football e consumo diario |
-| [Calculo de Requisicoes por Jogo](analises/calculo-requisicoes-per-jogo.md) | Calculo detalhado de requisicoes por jogo na janela |
-| [Executive Analysis](analises/executive-analysis.md) | Visao geral do sistema, arquitetura, componentes |
-| [Decision Model](analises/decision-model.md) | Pressure Score, projecao hibrida, calculo de edge |
-| [**Auditoria Completa 2026-02-15**](analises/2026-02-15-auditoria-completa.md) | Auditoria de 8 fases: BUG CRITICO encontrado (0 sinais gerados), fix aplicado, analise de estrategia, avaliacao de linhas, gargalos, recomendacoes |
-
-## Resumo
-
-Resumos executivos, relatorios de performance, snapshots do sistema.
-
-| Documento | Descricao |
-|-----------|-----------|
-| [WAHA Session Fix — 2-Min Summary](resumo/2026-02-15-waha-session-fix-summary.md) | ✅ Leia isto PRIMEIRO. Problema: webhook retornava ok mas WhatsApp não recebia. Root cause: session era fechada após cada call. Solução: gerenciador persistente. Validação: 5min. |
-
-## Sprints
-
-Planejamento de evolucao, roadmap, tarefas futuras.
-
-| Documento | Descricao |
-|-----------|-----------|
-| [**Next Steps: Production Validation**](sprints/2026-02-15-next-steps.md) | ⏭️ LEIA ISTO AGORA: Checklist do que fazer para validar e rodar em produção (testes WhatsApp, dashboard, troubleshooting) |
-| [Sprints de Melhoria](sprints/SPRINTS.md) | Roadmap: odds ao vivo, resultado automatico, backtest, mais ligas, dashboard avancado |
-
-## Setup & Deploy
-
-Como rodar, fazer deploy e configurar o sistema.
-
-| Documento | Descricao |
-|-----------|-----------|
-| [**Validation Testing Guide**](setup/validation-testing.md) | ✅ 5-min checklist para validar webhook WhatsApp funcionando, testes sequenciais, checklist pré-produção, regression testing |
-| [Docker Setup](setup/docker-setup.md) | Docker Compose, scripts shell, variaveis de ambiente |
-| [Cloudflare Setup](setup/cloudflare-setup.md) | Deploy no Cloudflare Workers para odontoschultz.online |
-| [Dashboard](setup/dashboard.md) | Portas do dashboard, proxy config, endpoints da API |
-| [Dashboard Deploy](setup/dashboard-deploy.md) | Guia de deploy do Dashboard em localhost e Cloudflare |
-| [Dashboard Quick Start](setup/dashboard-quick-start.md) | Quick start do Dashboard v2 |
-| [WAHA Plus - API Key](setup/waha-plus-api-key.md) | Como gerar nova API Key para WAHA Plus |
-| [WAHA - API Key web_dev](setup/waha-api-key-web-dev.md) | Criar API Key "web_dev" para localhost:3000 |
-
-## Changelog
-
-Registros de mudancas significativas no sistema.
-
-| Documento | Descricao |
-|-----------|-----------|
-| [2026-02-15 Fix: WAHA Session STOPPED - Webhook Não Respondia](changelog/2026-02-15-fix-waha-session-stopped.md) | 🔴 CRÍTICA: Webhook recebia ok mas WhatsApp não recebia resposta. Root cause: cliente WebappClient era criado/destruído a cada requisição, deixando session em STOPPED. Solução: gerenciador persistente de sessão com reutilização de cliente. |
-| [2026-02-15 Files Changed Summary](changelog/2026-02-15-files-changed.md) | Referência completa: quais arquivos foram modificados/criados (notifier/waha_manager.py, api_server.py, docs, scripts) |
-| [2026-02-15 Fix: WhatsApp Webhook e Comandos /status /jogos](changelog/2026-02-15-fix-whatsapp-webhook.md) | ✅ Resolvido: Comandos /status /jogos não respondiam. Causas: session name "cpes-alerts" incompatível com WAHA Core, API key descasada, webhook não registrado. Solução: mudar para session "default", sincronizar keys, registrar webhook em docker-compose. |
-| [2026-02-15 Fix Crítico: Agenda Retornava 0 Ligas](changelog/2026-02-15-fix-agenda-retornava-zero-ligas.md) | 🔴 CRÍTICA: Sistema retornava apenas 2 jogos da Argentina (bug: season 2026 aplicado globalmente). Solução: adicionar config season por liga, usar season_map dinâmico. Resultado: 0 → 13 jogos. |
-| [2026-02-15 Strategy Tuning](changelog/2026-02-15-strategy-tuning.md) | Reducao dos limiares de decisao para capturar mais sinais |
+> Bem-vindo. Este índice cobre toda a documentação do **Corner Pressure Elite System**
+> (interno) / **PressureIQ** (público). Sempre que adicionar um doc novo, linke aqui.
 
 ---
 
-## Adicionando novos documentos
+## 🧭 Comece por aqui (sempre atualizado)
 
-Consulte o [CLAUDE.md](../CLAUDE.md) para regras de posicionamento de documentos.
-Toda documentacao gerada por AI deve seguir a estrutura de categorias abaixo.
+- **[Estado Real do Sistema (2026-05-10)](analises/2026-05-10-estado-real-do-sistema.md)** —
+  auditoria completa do que existe e funciona hoje. **Leia primeiro.**
+- **[Plano Mestre de Produto](PRODUCT_MASTER_PLAN.md)** — visão executiva, marketing e arquitetura.
+- **[/CLAUDE.md](../CLAUDE.md)** — instruções para qualquer agente AI mexendo no repo.
 
-| Categoria | Pasta | O que vai aqui |
-|-----------|-------|----------------|
-| Architecture | `docs/architecture/` | Specs tecnicas completas, codigo-fonte documentado |
-| Analises | `docs/analises/` | Analises de componentes, modelos de decisao, estudos, avaliacoes |
-| Resumo | `docs/resumo/` | Resumos executivos, relatorios de performance, snapshots |
-| Sprints | `docs/sprints/` | Planejamento, roadmap, tarefas futuras, evolucao do sistema |
-| Setup | `docs/setup/` | Guias de deploy, config de ambiente, infra, como rodar |
-| Changelog | `docs/changelog/` | Registros de mudancas. Nomear como `YYYY-MM-DD-slug.md` |
+---
 
-**Convencao de nomes:** kebab-case em minusculo (ex: `decision-model.md`, nao `DecisionModel.md`)
+## 🚀 Começando
+
+| Doc | Descrição |
+|---|---|
+| [manuals/DEPLOYMENT.md](manuals/DEPLOYMENT.md) | Guia de instalação e deploy |
+| [manuals/USER_GUIDE.md](manuals/USER_GUIDE.md) | Guia do usuário do dashboard |
+| [setup/docker-setup.md](setup/docker-setup.md) | Subir ambiente via Docker Compose |
+| [setup/cloudflare-setup.md](setup/cloudflare-setup.md) | DNS, Tunnel e SSL |
+
+---
+
+## 🏗 Arquitetura
+
+| Doc | Descrição |
+|---|---|
+| [architecture/full-spec-v2-waha.md](architecture/full-spec-v2-waha.md) | Especificação técnica original (WAHA + engine) |
+| [architecture/sistema-completo.md](architecture/sistema-completo.md) | Visão geral integrada |
+| [architecture/upcoming-games-polling.md](architecture/upcoming-games-polling.md) | Polling adaptativo |
+| [architecture/waha-webhook-architecture.md](architecture/waha-webhook-architecture.md) | Webhook PUSH do WAHA Plus |
+| [api/ENDPOINTS.md](api/ENDPOINTS.md) | Referência da API REST |
+
+---
+
+## 🔬 Análises e estudos
+
+| Doc | Descrição |
+|---|---|
+| **[2026-05-10-estado-real-do-sistema.md](analises/2026-05-10-estado-real-do-sistema.md)** | Auditoria completa atual |
+| [analises/decision-model.md](analises/decision-model.md) | Modelo de decisão (escanteios) |
+| [analises/sistema-funcionamento-completo.md](analises/sistema-funcionamento-completo.md) | (legado: cita SQLite) |
+| [analises/analise-completa-sistema.md](analises/analise-completa-sistema.md) | Estudo inicial |
+| [analises/2026-02-15-auditoria-completa.md](analises/2026-02-15-auditoria-completa.md) | Auditoria de fevereiro |
+| [analises/calculo-requisicoes-per-jogo.md](analises/calculo-requisicoes-per-jogo.md) | Custo de API por jogo |
+| [analises/analise-cobertura-requisicoes.md](analises/analise-cobertura-requisicoes.md) | Capacidade por liga |
+| [analises/executive-analysis.md](analises/executive-analysis.md) | Visão executiva |
+| [analises/debug-agenda-argentina.md](analises/debug-agenda-argentina.md) | Bug seasons + agenda |
+| [analises/checklist-debug-agranda.md](analises/checklist-debug-agranda.md) | Checklist de debug agenda |
+| [analises/testes-manuais-agenda.md](analises/testes-manuais-agenda.md) | Roteiros manuais |
+| [analises/resumo-executivo-debug.md](analises/resumo-executivo-debug.md) | Resumo dos bugs investigados |
+
+---
+
+## 📋 Sprints e roadmap
+
+| Doc | Descrição |
+|---|---|
+| [sprints/SPRINTS.md](sprints/SPRINTS.md) | Roadmap geral |
+| [sprints/2026-02-15-next-steps.md](sprints/2026-02-15-next-steps.md) | Próximos passos pós-fevereiro |
+| [sprints/2026-05-11-bugs-fluxo-compra.md](sprints/2026-05-11-bugs-fluxo-compra.md) | Bugs pendentes do fluxo de compra Asaas (7 itens com prioridade) |
+| [sprints/2026-05-11-roadmap-7-features.md](sprints/2026-05-11-roadmap-7-features.md) | Roadmap de 7 features UX/produto com harness completo |
+| [sprints/2026-05-11-robo-auto-roadmap.md](sprints/2026-05-11-robo-auto-roadmap.md) | **Mestre** — Robô Auto-Aposta (visão, decisões, índice das 4 fases) |
+| [sprints/2026-05-11-robo-fase-1-plumbing.md](sprints/2026-05-11-robo-fase-1-plumbing.md) | Robô Fase 1 — Plumbing (schema, adapter contract, cifragem, UI esqueleto) |
+| [sprints/2026-05-11-robo-fase-2-paper-trading.md](sprints/2026-05-11-robo-fase-2-paper-trading.md) | Robô Fase 2 — Paper Trading (orchestrator simulando apostas) |
+| [sprints/2026-05-11-robo-fase-3-execucao-real.md](sprints/2026-05-11-robo-fase-3-execucao-real.md) | Robô Fase 3 — Execução Real (Betano/Bet365/KTO adapters, cashout, sanity) |
+| [sprints/2026-05-11-robo-fase-4-bankroll-ml.md](sprints/2026-05-11-robo-fase-4-bankroll-ml.md) | Robô Fase 4 — Bankroll, Cashout matemático, ML de qualidade |
+| [sprints/2026-05-11-robo-ux-dashboard.md](sprints/2026-05-11-robo-ux-dashboard.md) | Robô UX — gate MAX-only, sidebar, wizard de setup, telas, animações, a11y |
+| [sprints/2026-05-11-migracao-dominio-iqpressure.md](sprints/2026-05-11-migracao-dominio-iqpressure.md) | Harness passo a passo da migração `odontoschultz.online` → `iqpressure.online` (Hostinger, Cloudflare Tunnel, Resend, Asaas, CORS) |
+
+---
+
+## 📜 Changelog
+
+| Data | Mudança |
+|---|---|
+| [2026-05-11-fluxo-compra-pre-golive.md](changelog/2026-05-11-fluxo-compra-pre-golive.md) | Fluxo de compra: refund, dedup de webhooks, checkout idempotente, UX pós-verify |
+| [2026-05-10-adapter-permission-policy-claude-local.md](changelog/2026-05-10-adapter-permission-policy-claude-local.md) | Política de permissão migrou do adapter para o harness (PREA-22/23) |
+| [2026-05-10-waha-healthcheck-periodico.md](changelog/2026-05-10-waha-healthcheck-periodico.md) | Healthcheck WAHA periódico + alerta admin |
+| [2026-02-15-strategy-tuning.md](changelog/2026-02-15-strategy-tuning.md) | Tuning de thresholds |
+| [2026-02-15-fix-waha-session-stopped.md](changelog/2026-02-15-fix-waha-session-stopped.md) | Fix Session STOPPED (singleton) |
+| [2026-02-15-fix-whatsapp-webhook.md](changelog/2026-02-15-fix-whatsapp-webhook.md) | Fix registro de webhook PUT |
+| [2026-02-15-fix-agenda-retornava-zero-ligas.md](changelog/2026-02-15-fix-agenda-retornava-zero-ligas.md) | Fix seasons por liga |
+| [2026-02-15-files-changed.md](changelog/2026-02-15-files-changed.md) | Arquivos alterados na release |
+
+---
+
+## 🛠 Setup específico
+
+| Doc | Descrição |
+|---|---|
+| [setup/dashboard.md](setup/dashboard.md) | Dashboard (Next.js) |
+| [setup/dashboard-deploy.md](setup/dashboard-deploy.md) | Deploy do dashboard |
+| [setup/dashboard-quick-start.md](setup/dashboard-quick-start.md) | Quick start |
+| [setup/GERAR-WAHA-API-KEY.md](setup/GERAR-WAHA-API-KEY.md) | Gerar API key WAHA |
+| [setup/waha-api-key-web-dev.md](setup/waha-api-key-web-dev.md) | API key via WAHA Web |
+| [setup/waha-plus-api-key.md](setup/waha-plus-api-key.md) | API key WAHA Plus |
+| [setup/whatsapp-testing-guide.md](setup/whatsapp-testing-guide.md) | Testes WhatsApp |
+| [setup/validation-testing.md](setup/validation-testing.md) | Validação ponta a ponta |
+
+---
+
+## 📂 Estrutura de pastas
+
+- `/corner-pressure-elite/` — Backend Python (FastAPI + robô)
+- `/dashboard/` — Frontend Next.js
+- `/docs/` — Documentação (você está aqui)
+- `/docs/credenciais/` — **Não commitar** (segredos)
+- `/docs/legacy/` — Eventualmente: snapshots antigos consolidados
+
+## 🔄 Status do Sistema
+
+5 containers Docker (Postgres é compartilhado):
+
+1. **waha** — Gateway WhatsApp Plus (porta 3000)
+2. **cpes-api** — FastAPI (porta 8000)
+3. **cpes-dashboard** — Next.js (porta 3001)
+4. **cpes-main** — Robô de análise (sem porta)
+5. **cpes-postgres** — PostgreSQL 15 (interno)
+
+---
+
+*Última atualização: 2026-05-10.*
