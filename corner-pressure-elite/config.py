@@ -237,3 +237,26 @@ BETANO_BRIDGE_CAPTURE_SEC = float(os.getenv("BETANO_BRIDGE_CAPTURE_SEC", "5.0"))
 # [MIN, MAX]; se nenhuma cai, degrada pra mais próxima do centro da faixa.
 BETANO_BRIDGE_PREFERRED_ODD_MIN = float(os.getenv("BETANO_BRIDGE_PREFERRED_ODD_MIN", "1.50"))
 BETANO_BRIDGE_PREFERRED_ODD_MAX = float(os.getenv("BETANO_BRIDGE_PREFERRED_ODD_MAX", "1.70"))
+
+
+def _parse_betano_event_map(raw: str) -> dict:
+    """Parseia "fixture_id1=event_id1,fixture_id2=event_id2" -> {int: str}.
+
+    Seed manual temporário da Fase 2bc: alimenta a tabela betano_fixture_map
+    no startup pra o bridge resolver fixture->event_id. A Fase D substitui
+    isto por um populador automático (fuzzy match nome+horário).
+    """
+    mapping: dict = {}
+    for par in raw.split(","):
+        par = par.strip()
+        if not par or "=" not in par:
+            continue
+        fid, eid = par.split("=", 1)
+        fid, eid = fid.strip(), eid.strip()
+        if fid.isdigit() and eid:
+            mapping[int(fid)] = eid
+    return mapping
+
+
+# Seed manual fixture_id -> betano_event_id (temporário, ver Fase D).
+BETANO_EVENT_MAP = _parse_betano_event_map(os.getenv("BETANO_EVENT_MAP", ""))

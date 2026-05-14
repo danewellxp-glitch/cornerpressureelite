@@ -1,5 +1,7 @@
+import asyncio
 import asyncpg
 import logging
+from pathlib import Path
 from typing import Optional, List, Dict
 from datetime import datetime
 import json
@@ -8,6 +10,8 @@ from data.models import Sinal, SinalCartoes, RegistroSinal, JogoAoVivo, User, Su
 from config import DATABASE_URL
 
 logger = logging.getLogger("CPES.Database")
+
+MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sinais (
@@ -31,7 +35,11 @@ CREATE TABLE IF NOT EXISTS sinais (
     escanteios_final INTEGER,
     roi DECIMAL(5,2),
     tipo_analise TEXT DEFAULT 'ESCANTEIOS',
-    matching_tiers TEXT[] DEFAULT '{}'
+    matching_tiers TEXT[] DEFAULT '{}',
+    -- Rastreabilidade (2026-05-11): fonte e variantes da linha
+    bookmaker_usado VARCHAR(20),         -- 'betano' | 'bet365' | 'consolidada'
+    linha_betano DECIMAL(4,1),
+    linha_bet365 DECIMAL(4,1)
 );
 
 CREATE TABLE IF NOT EXISTS detalhes_jogo (
@@ -100,6 +108,8 @@ CREATE TABLE IF NOT EXISTS users (
     verification_code VARCHAR(6),
     verification_expires_at TIMESTAMP,
     verification_attempts INTEGER DEFAULT 0,
+    notifications_paused_until TIMESTAMP,
+    recovery_email_sent_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -125,12 +135,13 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS user_strategy_preferences (
+CREATE TABLE IF NOT EXISTS user_strategy_preference (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id) NOT NULL UNIQUE,
-    corners_strategy VARCHAR(20) NOT NULL DEFAULT 'moderate',
-    cards_strategy VARCHAR(20) NOT NULL DEFAULT 'moderate',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    strategy TEXT NOT NULL CHECK (strategy IN ('conservative','moderate','aggressive','brute')),
+    market TEXT NOT NULL CHECK (market IN ('corners','cards')),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, market)
 );
 
 CREATE TABLE IF NOT EXISTS app_state (
@@ -138,11 +149,100 @@ CREATE TABLE IF NOT EXISTS app_state (
     data JSONB,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS processed_payments (
+    asaas_payment_id VARCHAR(50) NOT NULL,
+    event_group VARCHAR(20) NOT NULL,
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (asaas_payment_id, event_group)
+);
+
+-- ============= Robô Auto-Aposta =============
+
+CREATE TABLE IF NOT EXISTS bot_config (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    enabled BOOLEAN DEFAULT FALSE,
+    mode TEXT NOT NULL DEFAULT 'paper' CHECK (mode IN ('paper','real')),
+    bet_house TEXT,
+    banca_inicial_cents BIGINT NOT NULL DEFAULT 0,
+    banca_atual_cents BIGINT NOT NULL DEFAULT 0,
+    max_loss_per_day_cents BIGINT NOT NULL DEFAULT 0,
+    max_bets_per_day INTEGER NOT NULL DEFAULT 0,
+    unit_pct REAL NOT NULL DEFAULT 0.01,
+    allowed_leagues INTEGER[] DEFAULT '{}',
+    allowed_markets TEXT[] DEFAULT '{}',
+    kill_switch BOOLEAN DEFAULT FALSE,
+    real_mode_unlocked BOOLEAN DEFAULT FALSE,
+    accepted_tos_at TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS bet_house_credentials (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    bet_house TEXT NOT NULL,
+    username_ct BYTEA NOT NULL,
+    password_ct BYTEA NOT NULL,
+    nonce BYTEA NOT NULL,
+    last_validated_at TIMESTAMP,
+    status TEXT NOT NULL DEFAULT 'unverified',
+    PRIMARY KEY (user_id, bet_house)
+);
+
+CREATE TABLE IF NOT EXISTS bets (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    signal_id INTEGER REFERENCES sinais(id),
+    market TEXT NOT NULL,
+    bet_house TEXT,
+    bet_house_bet_id TEXT,
+    mode TEXT NOT NULL DEFAULT 'paper',
+    stake_cents BIGINT NOT NULL,
+    odd REAL NOT NULL,
+    linha REAL NOT NULL,
+    selecao TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    payout_cents BIGINT DEFAULT 0,
+    placed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    settled_at TIMESTAMP,
+    UNIQUE (user_id, signal_id, market)
+);
+
+CREATE INDEX IF NOT EXISTS bets_user_status ON bets(user_id, status);
+
+CREATE TABLE IF NOT EXISTS bot_audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    decision_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    context JSONB NOT NULL,
+    result JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS bot_audit_user_time ON bot_audit_log(user_id, created_at DESC);
+
+-- Mapping fixture_id (API-Football) -> betano_event_id (bridge Betano).
+-- Fase 2bc: alimentado por seed manual via env BETANO_EVENT_MAP.
+-- Coluna mantida como betano_event_id pra compatibilidade com FixtureMapRepo.
+CREATE TABLE IF NOT EXISTS betano_fixture_map (
+    fixture_id INTEGER PRIMARY KEY,
+    betano_event_id TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
 class Database:
-    """Gerenciamento de banco de dados PostgreSQL."""
+    """Gerenciamento de banco de dados PostgreSQL.
+
+    O pool eh compartilhado entre todas as instancias do processo (class-level)
+    para evitar TooManyConnectionsError: cada Database() criava um pool novo
+    de ~10 conexoes; com 18 endpoints instanciando Database() por request,
+    Postgres (max_connections=100) saturava.
+    """
+
+    _shared_pool: Optional[asyncpg.Pool] = None
+    _pool_lock: Optional[asyncio.Lock] = None
 
     def __init__(self, db_url: Optional[str] = None):
         # Convert dialect for asyncpg if necessary
@@ -150,14 +250,30 @@ class Database:
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql://", 1)
         self.db_url = url
-        self.pool = None
+
+    @property
+    def pool(self) -> Optional[asyncpg.Pool]:
+        return Database._shared_pool
 
     async def connect(self):
-        """Inicializa o pool de conexões."""
-        if not self.pool:
+        """Inicializa o pool compartilhado (apenas uma vez por processo)."""
+        if Database._shared_pool is not None:
+            return
+
+        if Database._pool_lock is None:
+            Database._pool_lock = asyncio.Lock()
+
+        async with Database._pool_lock:
+            if Database._shared_pool is not None:
+                return
             try:
-                self.pool = await asyncpg.create_pool(self.db_url)
-                logger.info("Connected to PostgreSQL pool.")
+                Database._shared_pool = await asyncpg.create_pool(
+                    self.db_url,
+                    min_size=2,
+                    max_size=15,
+                    command_timeout=30,
+                )
+                logger.info("Connected to PostgreSQL pool (shared, max_size=15).")
             except Exception as e:
                 logger.error(f"Failed to connect to PostgreSQL: {e}")
                 raise
@@ -166,7 +282,97 @@ class Database:
         await self.connect()
         async with self.pool.acquire() as conn:
             await conn.execute(SCHEMA)
+            await self._migrate_subscriptions_unique(conn)
+            await self._migrate_users_columns(conn)
+            await self._apply_sql_migrations(conn)
         logger.info(f"Banco de dados inicializado: {self.db_url}")
+
+    async def seed_betano_fixture_map(self, mapping: Dict[int, str]) -> int:
+        """UPSERT seed manual fixture_id -> betano_event_id (Fase 2bc).
+
+        Idempotente: re-run sobrescreve. Retorna quantidade de linhas seedadas.
+        """
+        if not mapping:
+            return 0
+        async with self.pool.acquire() as conn:
+            await conn.executemany(
+                """
+                INSERT INTO betano_fixture_map (fixture_id, betano_event_id)
+                VALUES ($1, $2)
+                ON CONFLICT (fixture_id) DO UPDATE
+                  SET betano_event_id = EXCLUDED.betano_event_id,
+                      created_at = CURRENT_TIMESTAMP
+                """,
+                [(fid, str(eid)) for fid, eid in mapping.items()],
+            )
+        return len(mapping)
+
+    async def _apply_sql_migrations(self, conn) -> None:
+        """Aplica arquivos .sql em migrations/ em ordem lexicográfica.
+
+        Os arquivos devem ser idempotentes (IF NOT EXISTS). Sem tabela de
+        controle por enquanto — Fase D só introduz tabelas novas com guard.
+        """
+        if not MIGRATIONS_DIR.is_dir():
+            return
+        files = sorted(MIGRATIONS_DIR.glob("*.sql"))
+        for path in files:
+            sql = path.read_text(encoding="utf-8")
+            if not sql.strip():
+                continue
+            await conn.execute(sql)
+            logger.info(f"[MIGRATION] aplicado: {path.name}")
+
+    async def _migrate_users_columns(self, conn) -> None:
+        """Adiciona colunas que não existiam em versões antigas do schema. Idempotente."""
+        await conn.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS notifications_paused_until TIMESTAMP"
+        )
+        await conn.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_email_sent_at TIMESTAMP"
+        )
+        # sinais.matching_tiers (criado depois do schema inicial)
+        await conn.execute(
+            "ALTER TABLE sinais ADD COLUMN IF NOT EXISTS matching_tiers TEXT[] DEFAULT '{}'"
+        )
+        await conn.execute(
+            "ALTER TABLE sinais ADD COLUMN IF NOT EXISTS tipo_analise TEXT DEFAULT 'ESCANTEIOS'"
+        )
+        # sinais — rastreabilidade da linha (2026-05-11)
+        await conn.execute(
+            "ALTER TABLE sinais ADD COLUMN IF NOT EXISTS bookmaker_usado VARCHAR(20)"
+        )
+        await conn.execute(
+            "ALTER TABLE sinais ADD COLUMN IF NOT EXISTS linha_betano DECIMAL(4,1)"
+        )
+        await conn.execute(
+            "ALTER TABLE sinais ADD COLUMN IF NOT EXISTS linha_bet365 DECIMAL(4,1)"
+        )
+
+    async def _migrate_subscriptions_unique(self, conn) -> None:
+        """Garante 1 sub por user. Idempotente — roda em todo startup.
+
+        1) deduplica linhas existentes (mantém a maior id por user_id)
+        2) cria unique index em user_id (habilita ON CONFLICT (user_id))
+        """
+        deleted = await conn.fetchval(
+            """
+            WITH dups AS (
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY id DESC) AS rn
+                FROM subscriptions
+            )
+            DELETE FROM subscriptions WHERE id IN (SELECT id FROM dups WHERE rn > 1)
+            RETURNING id
+            """
+        )
+        if deleted is not None:
+            count = await conn.fetchval(
+                "SELECT COUNT(*) FROM subscriptions"
+            )
+            logger.info(f"[MIGRATION] subscriptions: tabela com {count} linhas após dedupe")
+        await conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_user_id_uniq ON subscriptions(user_id)"
+        )
 
     async def init_ligas_config(self, all_liga_ids: List[int]):
         """Inicializa config de ligas e remove ligas que não estão mais no config."""
@@ -224,14 +430,17 @@ class Database:
                         timestamp, liga_id, liga_nome, jogo_id, jogo_descricao,
                         minuto, placar, escanteios_total, linha, odd,
                         projecao, edge, pressure_score, tipo_sinal, reavaliacao,
-                        matching_tiers
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                        matching_tiers, bookmaker_usado, linha_betano, linha_bet365
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
                     RETURNING id
                     """,
                     datetime.now(), jogo.liga_id, jogo.liga_nome, jogo.id, jogo.descricao,
                     jogo.minuto, jogo.placar, jogo.escanteios_total, jogo.linha_atual,
                     jogo.odd_atual, sinal.projecao, sinal.edge, sinal.pressure_score,
-                    sinal.tipo, sinal.reavaliacao, sinal.matching_tiers
+                    sinal.tipo, sinal.reavaliacao, sinal.matching_tiers,
+                    jogo.bookmaker_usado or None,
+                    jogo.linha_betano if jogo.linha_betano > 0 else None,
+                    jogo.linha_bet365 if jogo.linha_bet365 > 0 else None,
                 )
                 await conn.execute(
                     """
@@ -355,14 +564,14 @@ class Database:
             reds = await conn.fetchval(f"SELECT COUNT(DISTINCT jogo_id) FROM sinais WHERE resultado = 'RED'{filtro_r}", *params_r)
             
             roi_total = await conn.fetchval(
-                f"""SELECT COALESCE(SUM(roi), 0) FROM sinais 
-                WHERE roi IS NOT NULL 
+                f"""SELECT COALESCE(SUM(roi), 0) FROM sinais
+                WHERE roi IS NOT NULL
                 AND id IN (
-                    SELECT MIN(id) FROM sinais 
+                    SELECT MIN(id) FROM sinais
                     WHERE resultado IS NOT NULL{filtro_r}
                     GROUP BY jogo_id
                 ){filtro_r}""",
-                *(params_r + params_r)
+                *params_r
             )
 
         pendentes = total - greens - reds
@@ -423,6 +632,40 @@ class Database:
                         chave, valor,
                     )
         logger.info(f"Thresholds atualizados: {updates}")
+
+    async def init_dev_mode_config(self):
+        """Seed dev_mode_config na app_state com defaults do .env se nao existir."""
+        from config import (
+            DEV_TEST_MODE,
+            DEV_TEST_MAX_GAMES,
+            DEV_TEST_POLLING_INTERVAL,
+            DEV_TEST_STATUS_CHECK_INTERVAL,
+            DEV_TEST_API_DAILY_LIMIT,
+        )
+        defaults = {
+            "enabled": bool(DEV_TEST_MODE),
+            "max_games": int(DEV_TEST_MAX_GAMES),
+            "polling_interval": int(DEV_TEST_POLLING_INTERVAL),
+            "status_check_interval": int(DEV_TEST_STATUS_CHECK_INTERVAL),
+            "api_daily_limit": int(DEV_TEST_API_DAILY_LIMIT),
+            "normal_polling_interval": 60,
+            "normal_status_check_interval": 300,
+            "normal_api_daily_limit": 7500,
+        }
+        await self.connect()
+        async with self.pool.acquire() as conn:
+            existing = await conn.fetchval(
+                "SELECT data FROM app_state WHERE key = $1", "dev_mode_config"
+            )
+            if existing is None:
+                await conn.execute(
+                    """
+                    INSERT INTO app_state (key, data, updated_at)
+                    VALUES ($1, $2, NOW())
+                    """,
+                    "dev_mode_config", json.dumps(defaults),
+                )
+                logger.info("Initialized dev_mode_config: %s", defaults)
 
     async def upsert_state(self, key: str, data: dict):
         """Salva um documento JSON na tabela app_state."""
@@ -485,6 +728,18 @@ class Database:
             logger.error(f"Erro ao buscar usuario {email}: {e}")
             return None
     
+    async def get_user_by_whatsapp(self, whatsapp: str) -> Optional[User]:
+        """Look up a user by their WhatsApp number."""
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow("SELECT * FROM users WHERE whatsapp = $1", whatsapp)
+                if row: return self._map_user(row)
+            return None
+        except Exception as e:
+            logger.error(f"Erro ao buscar usuario por WhatsApp {whatsapp}: {e}")
+            return None
+
     async def get_user_by_id(self, user_id: int) -> Optional[User]:
         await self.connect()
         try:
@@ -495,6 +750,572 @@ class Database:
         except Exception as e:
             logger.error(f"Erro ao buscar usuario ID {user_id}: {e}")
             return None
+
+    async def get_strategy_performance(self, market: str, days: int = 30) -> Dict[str, Dict]:
+        """Performance histórica por tier no mercado dado (corners | cards).
+
+        Retorna dict { tier: { n, greens, reds, hit_rate, roi_pct } } para os 4 tiers,
+        agregado sobre sinais resolvidos (GREEN/RED) dos últimos `days` dias.
+        Tiers sem sinais saem com n=0.
+        """
+        tipo = "ESCANTEIOS" if market == "corners" else "CARTOES"
+        tiers = ("conservative", "moderate", "aggressive", "brute")
+        result: Dict[str, Dict] = {
+            t: {"tier": t, "n": 0, "greens": 0, "reds": 0, "hit_rate": 0.0, "roi_pct": 0.0}
+            for t in tiers
+        }
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        tier,
+                        COUNT(*) AS n,
+                        COUNT(*) FILTER (WHERE resultado = 'GREEN') AS greens,
+                        COUNT(*) FILTER (WHERE resultado = 'RED') AS reds,
+                        COALESCE(AVG(roi), 0) AS avg_roi
+                    FROM sinais, UNNEST(matching_tiers) AS tier
+                    WHERE tipo_analise = $1
+                      AND resultado IN ('GREEN','RED')
+                      AND timestamp > NOW() - ($2::int * INTERVAL '1 day')
+                      AND tier = ANY($3::text[])
+                    GROUP BY tier
+                    """,
+                    tipo, days, list(tiers),
+                )
+                for r in rows:
+                    n = int(r["n"]) or 0
+                    greens = int(r["greens"]) or 0
+                    reds = int(r["reds"]) or 0
+                    resolved = greens + reds
+                    avg_roi = float(r["avg_roi"]) if r["avg_roi"] is not None else 0.0
+                    result[r["tier"]] = {
+                        "tier": r["tier"],
+                        "n": n,
+                        "greens": greens,
+                        "reds": reds,
+                        "hit_rate": (greens / resolved) if resolved > 0 else 0.0,
+                        "roi_pct": avg_roi * 100.0,  # roi é fração (0.15 = +15%)
+                    }
+        except Exception as e:
+            logger.error(f"Erro em get_strategy_performance({market}): {e}")
+        return result
+
+    # ============= Robô Auto-Aposta =============
+
+    async def get_bot_config(self, user_id: int) -> Optional[Dict]:
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM bot_config WHERE user_id = $1", user_id
+                )
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Erro buscando bot_config user {user_id}: {e}")
+            return None
+
+    async def upsert_bot_config(self, user_id: int, fields: Dict) -> bool:
+        """Upsert parcial — só atualiza campos passados. Cria row se não existir."""
+        if not fields:
+            return False
+        allowed = {
+            "enabled", "mode", "bet_house", "banca_inicial_cents", "banca_atual_cents",
+            "max_loss_per_day_cents", "max_bets_per_day", "unit_pct", "allowed_leagues",
+            "allowed_markets", "kill_switch", "real_mode_unlocked", "accepted_tos_at",
+        }
+        clean = {k: v for k, v in fields.items() if k in allowed}
+        if not clean:
+            return False
+
+        cols = list(clean.keys())
+        values = [clean[c] for c in cols]
+        placeholders = ", ".join(f"${i+2}" for i in range(len(cols)))
+        set_clauses = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols)
+
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    f"""
+                    INSERT INTO bot_config (user_id, {', '.join(cols)}, updated_at)
+                    VALUES ($1, {placeholders}, NOW())
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        {set_clauses}, updated_at = NOW()
+                    """,
+                    user_id, *values,
+                )
+                return True
+        except Exception as e:
+            logger.error(f"Erro upsert bot_config user {user_id}: {e}")
+            return False
+
+    async def list_user_credentials(self, user_id: int) -> List[Dict]:
+        """Lista casas configuradas para o user — SEM retornar username/password.
+
+        Retorna apenas metadata: bet_house, status, last_validated_at.
+        """
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT bet_house, status, last_validated_at FROM bet_house_credentials WHERE user_id = $1",
+                    user_id,
+                )
+                return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"Erro listando credentials user {user_id}: {e}")
+            return []
+
+    async def upsert_credential(
+        self, user_id: int, bet_house: str,
+        username_ct: bytes, password_ct: bytes, nonce: bytes,
+    ) -> bool:
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO bet_house_credentials
+                        (user_id, bet_house, username_ct, password_ct, nonce, status)
+                    VALUES ($1, $2, $3, $4, $5, 'unverified')
+                    ON CONFLICT (user_id, bet_house) DO UPDATE SET
+                        username_ct = EXCLUDED.username_ct,
+                        password_ct = EXCLUDED.password_ct,
+                        nonce = EXCLUDED.nonce,
+                        status = 'unverified',
+                        last_validated_at = NULL
+                    """,
+                    user_id, bet_house, username_ct, password_ct, nonce,
+                )
+                return True
+        except Exception as e:
+            logger.error(f"Erro upsert credential user {user_id}/{bet_house}: {e}")
+            return False
+
+    async def delete_credential(self, user_id: int, bet_house: str) -> bool:
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                result = await conn.execute(
+                    "DELETE FROM bet_house_credentials WHERE user_id = $1 AND bet_house = $2",
+                    user_id, bet_house,
+                )
+                return result.startswith("DELETE")
+        except Exception as e:
+            logger.error(f"Erro delete credential user {user_id}/{bet_house}: {e}")
+            return False
+
+    async def get_bot_global_kill(self) -> bool:
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchval(
+                    "SELECT data FROM app_state WHERE key = 'bot_global_kill'"
+                )
+                if row is None:
+                    return False
+                # asyncpg retorna JSONB como str por padrão (sem custom codec)
+                if isinstance(row, str):
+                    try:
+                        row = json.loads(row)
+                    except Exception:
+                        return False
+                if isinstance(row, dict):
+                    return bool(row.get("enabled"))
+                return bool(row)
+        except Exception as e:
+            logger.error(f"Erro lendo bot_global_kill: {e}")
+            return False
+
+    async def set_bot_global_kill(self, enabled: bool) -> bool:
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO app_state (key, data, updated_at)
+                    VALUES ('bot_global_kill', $1::jsonb, NOW())
+                    ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+                    """,
+                    json.dumps({"enabled": enabled}),
+                )
+                return True
+        except Exception as e:
+            logger.error(f"Erro setando bot_global_kill: {e}")
+            return False
+
+    # --- Queries usadas pelo bot orchestrator (Fase 2) ---
+
+    async def get_bot_checkpoint(self) -> int:
+        """Último signal_id processado pelo bot. 0 se nunca rodou."""
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchval(
+                    "SELECT data FROM app_state WHERE key = 'bot_checkpoint'"
+                )
+                if row is None:
+                    return 0
+                if isinstance(row, str):
+                    try:
+                        row = json.loads(row)
+                    except Exception:
+                        return 0
+                if isinstance(row, dict):
+                    return int(row.get("last_signal_id", 0))
+                return 0
+        except Exception as e:
+            logger.error(f"Erro lendo bot_checkpoint: {e}")
+            return 0
+
+    async def set_bot_checkpoint(self, last_signal_id: int) -> bool:
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO app_state (key, data, updated_at)
+                    VALUES ('bot_checkpoint', $1::jsonb, NOW())
+                    ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+                    """,
+                    json.dumps({"last_signal_id": last_signal_id}),
+                )
+                return True
+        except Exception as e:
+            logger.error(f"Erro salvando bot_checkpoint: {e}")
+            return False
+
+    async def signals_after(self, last_id: int, limit: int = 50) -> List[Dict]:
+        """Retorna sinais com id > last_id, ordenados por id ASC.
+
+        Inclui apenas sinais elegíveis (não reavaliação). Retorna campos chave
+        usados pelo orchestrator pra tomar decisão.
+        """
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, liga_id, jogo_id, jogo_descricao, minuto,
+                           linha, odd, edge, pressure_score, tipo_sinal,
+                           tipo_analise, matching_tiers, timestamp, resultado, roi
+                    FROM sinais
+                    WHERE id > $1 AND reavaliacao = FALSE
+                    ORDER BY id ASC
+                    LIMIT $2
+                    """,
+                    last_id, limit,
+                )
+                return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"Erro signals_after({last_id}): {e}")
+            return []
+
+    async def users_with_bot_enabled(self) -> List[Dict]:
+        """Users com bot ativo e ToS aceito. Retorna tudo que orchestrator precisa."""
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT u.id AS user_id, u.role,
+                           c.enabled, c.mode, c.bet_house,
+                           c.banca_inicial_cents, c.banca_atual_cents,
+                           c.max_loss_per_day_cents, c.max_bets_per_day,
+                           c.unit_pct, c.allowed_leagues, c.allowed_markets,
+                           c.kill_switch
+                    FROM users u
+                    JOIN bot_config c ON c.user_id = u.id
+                    LEFT JOIN subscriptions s ON s.user_id = u.id
+                    WHERE c.enabled = TRUE
+                      AND c.kill_switch = FALSE
+                      AND c.accepted_tos_at IS NOT NULL
+                      AND (
+                          u.role = 'admin'
+                          OR (s.status = 'active' AND s.plan = 'max'
+                              AND (s.expires_at IS NULL OR s.expires_at > NOW()))
+                      )
+                    """
+                )
+                return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"Erro users_with_bot_enabled: {e}")
+            return []
+
+    async def insert_bet(self, bet: Dict) -> Optional[int]:
+        """Insere uma bet. Idempotência via UNIQUE (user_id, signal_id, market).
+        Retorna id da bet, ou None se já existia (conflito) ou erro.
+        """
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO bets (
+                        user_id, signal_id, market, bet_house, bet_house_bet_id,
+                        mode, stake_cents, odd, linha, selecao, status
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'open')
+                    ON CONFLICT (user_id, signal_id, market) DO NOTHING
+                    RETURNING id
+                    """,
+                    bet["user_id"], bet.get("signal_id"), bet["market"],
+                    bet.get("bet_house"), bet.get("bet_house_bet_id"),
+                    bet.get("mode", "paper"), bet["stake_cents"], bet["odd"],
+                    bet["linha"], bet["selecao"],
+                )
+                return row["id"] if row else None
+        except Exception as e:
+            logger.error(f"Erro insert_bet user {bet.get('user_id')}: {e}")
+            return None
+
+    async def get_bet_by_user_signal(self, user_id: int, signal_id: int, market: str) -> Optional[Dict]:
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM bets WHERE user_id=$1 AND signal_id=$2 AND market=$3",
+                    user_id, signal_id, market,
+                )
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Erro get_bet_by_user_signal: {e}")
+            return None
+
+    async def get_open_bets_for_signal(self, signal_id: int) -> List[Dict]:
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT * FROM bets WHERE signal_id=$1 AND status='open'",
+                    signal_id,
+                )
+                return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"Erro get_open_bets_for_signal: {e}")
+            return []
+
+    async def settle_bet(
+        self, bet_id: int, status: str, payout_cents: int,
+    ) -> bool:
+        """Marca bet como won/lost/cashed_out e seta payout."""
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE bets
+                    SET status=$2, payout_cents=$3, settled_at=NOW()
+                    WHERE id=$1 AND status='open'
+                    """,
+                    bet_id, status, payout_cents,
+                )
+                return True
+        except Exception as e:
+            logger.error(f"Erro settle_bet {bet_id}: {e}")
+            return False
+
+    async def adjust_banca(self, user_id: int, delta_cents: int) -> bool:
+        """Adiciona delta na banca_atual_cents. Pode ser negativo."""
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE bot_config
+                    SET banca_atual_cents = banca_atual_cents + $2, updated_at = NOW()
+                    WHERE user_id = $1
+                    """,
+                    user_id, delta_cents,
+                )
+                return True
+        except Exception as e:
+            logger.error(f"Erro adjust_banca user {user_id}: {e}")
+            return False
+
+    async def count_bets_today(self, user_id: int) -> int:
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                return await conn.fetchval(
+                    """
+                    SELECT COUNT(*) FROM bets
+                    WHERE user_id=$1 AND placed_at::date = CURRENT_DATE
+                    """,
+                    user_id,
+                ) or 0
+        except Exception as e:
+            logger.error(f"Erro count_bets_today user {user_id}: {e}")
+            return 0
+
+    async def sum_losses_today_cents(self, user_id: int) -> int:
+        """Soma perdas (stake - payout) das bets resolvidas hoje. Sempre >= 0."""
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                v = await conn.fetchval(
+                    """
+                    SELECT COALESCE(SUM(stake_cents - payout_cents), 0)
+                    FROM bets
+                    WHERE user_id=$1
+                      AND settled_at::date = CURRENT_DATE
+                      AND status IN ('lost', 'cashed_out')
+                      AND payout_cents < stake_cents
+                    """,
+                    user_id,
+                )
+                return int(v or 0)
+        except Exception as e:
+            logger.error(f"Erro sum_losses_today user {user_id}: {e}")
+            return 0
+
+    async def insert_audit(
+        self, user_id: Optional[int], decision_id: str, event_type: str,
+        context: Dict, result: Optional[Dict] = None,
+    ) -> bool:
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO bot_audit_log (user_id, decision_id, event_type, context, result)
+                    VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
+                    """,
+                    user_id, decision_id, event_type,
+                    json.dumps(context), json.dumps(result) if result else None,
+                )
+                return True
+        except Exception as e:
+            logger.error(f"Erro insert_audit: {e}")
+            return False
+
+    async def list_abandoned_checkouts(self, min_age_hours: int = 1) -> List[Dict]:
+        """Users com sub pending há mais de X horas e que ainda não receberam recovery.
+
+        Retorna [{user_id, email, full_name, plan, asaas_id}]. O caller é responsável
+        por (1) re-checar status antes de enviar e (2) marcar recovery_email_sent_at.
+        """
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT u.id AS user_id, u.email, u.full_name,
+                           s.plan, s.asaas_id, s.created_at AS sub_created_at
+                    FROM users u
+                    JOIN subscriptions s ON s.user_id = u.id
+                    WHERE s.status = 'pending'
+                      AND s.created_at < NOW() - ($1::int * INTERVAL '1 hour')
+                      AND u.recovery_email_sent_at IS NULL
+                      AND u.is_verified = TRUE
+                      AND s.asaas_id IS NOT NULL
+                      AND s.asaas_id NOT LIKE 'pending_%'
+                    """,
+                    min_age_hours,
+                )
+                return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"Erro listando abandoned checkouts: {e}")
+            return []
+
+    async def mark_recovery_sent(self, user_id: int) -> bool:
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE users SET recovery_email_sent_at = NOW() WHERE id = $1",
+                    user_id,
+                )
+            return True
+        except Exception as e:
+            logger.error(f"Erro marcando recovery_sent user {user_id}: {e}")
+            return False
+
+    async def get_notifications_paused_until(self, user_id: int) -> Optional[datetime]:
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                return await conn.fetchval(
+                    "SELECT notifications_paused_until FROM users WHERE id = $1",
+                    user_id,
+                )
+        except Exception as e:
+            logger.error(f"Erro buscando paused_until user {user_id}: {e}")
+            return None
+
+    async def set_notifications_paused_until(
+        self, user_id: int, paused_until: Optional[datetime]
+    ) -> bool:
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE users SET notifications_paused_until = $1, updated_at = NOW() WHERE id = $2",
+                    paused_until, user_id,
+                )
+            return True
+        except Exception as e:
+            logger.error(f"Erro salvando paused_until user {user_id}: {e}")
+            return False
+
+    async def list_users_for_broadcast(self) -> List[Dict]:
+        """Usuários elegíveis para receber sinais via WhatsApp.
+
+        Critério: (admin OR subscription.status='active' não-expirada)
+                  AND verified AND whatsapp não vazio.
+
+        Dedup por whatsapp: se 2 contas compartilham o mesmo número (caso comum
+        admin + conta de testes), retorna só UMA entrada — prioriza role=admin,
+        depois plan=max, depois plan=pro, depois menor id.
+
+        Retorna [{id, whatsapp, full_name, plan, role}] — o caller decide
+        o que enviar com base no plano ('pro' = só corners, 'max' = ambos).
+        """
+        await self.connect()
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT u.id, u.whatsapp, u.full_name, u.role,
+                           COALESCE(s.plan, 'free') AS plan
+                    FROM users u
+                    LEFT JOIN subscriptions s ON s.user_id = u.id
+                    WHERE u.is_verified = TRUE
+                      AND u.whatsapp IS NOT NULL AND u.whatsapp <> ''
+                      AND (u.notifications_paused_until IS NULL
+                           OR u.notifications_paused_until < NOW())
+                      AND (
+                          u.role = 'admin'
+                          OR (
+                              s.status = 'active'
+                              AND (s.expires_at IS NULL OR s.expires_at > NOW())
+                          )
+                      )
+                    ORDER BY u.id
+                    """
+                )
+                users = [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"Erro ao listar usuários para broadcast: {e}")
+            return []
+
+        plan_rank = {"max": 0, "pro": 1, "free": 2}
+
+        def prio(u: Dict) -> tuple:
+            return (
+                0 if u.get("role") == "admin" else 1,
+                plan_rank.get(u.get("plan"), 9),
+                u.get("id", 0),
+            )
+
+        by_phone: Dict[str, Dict] = {}
+        for u in users:
+            phone = u.get("whatsapp", "")
+            existing = by_phone.get(phone)
+            if existing is None or prio(u) < prio(existing):
+                by_phone[phone] = u
+        return list(by_phone.values())
 
     async def update_user_verification(self, email: str, code: str, expires_at: datetime) -> bool:
         await self.connect()
@@ -560,6 +1381,7 @@ class Database:
             logger.error(f"Erro ao registrar email log: {e}")
 
     async def upsert_subscription(self, sub: Subscription) -> bool:
+        """Upsert por user_id. Exige unique index em subscriptions(user_id) — criado em init()."""
         await self.connect()
         try:
             async with self.pool.acquire() as conn:
@@ -567,12 +1389,17 @@ class Database:
                     """
                     INSERT INTO subscriptions (user_id, plan, asaas_id, status, starts_at, expires_at, next_due_date)
                     VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    ON CONFLICT (id) DO UPDATE SET 
-                        plan=EXCLUDED.plan, asaas_id=EXCLUDED.asaas_id, status=EXCLUDED.status,
-                        starts_at=EXCLUDED.starts_at, expires_at=EXCLUDED.expires_at, next_due_date=EXCLUDED.next_due_date
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        plan=EXCLUDED.plan,
+                        asaas_id=EXCLUDED.asaas_id,
+                        status=EXCLUDED.status,
+                        starts_at=COALESCE(EXCLUDED.starts_at, subscriptions.starts_at),
+                        expires_at=COALESCE(EXCLUDED.expires_at, subscriptions.expires_at),
+                        next_due_date=COALESCE(EXCLUDED.next_due_date, subscriptions.next_due_date)
                     """,
-                    sub.user_id, sub.plan, sub.asaas_id, sub.status, sub.starts_at, sub.expires_at, sub.next_due_date
-                ) # TODO: the conflict logic assumes an id but id is SERIAL, might need a constraint on user_id
+                    sub.user_id, sub.plan, sub.asaas_id, sub.status,
+                    sub.starts_at, sub.expires_at, sub.next_due_date,
+                )
                 return True
         except Exception as e:
             logger.error(f"Erro ao salvar assinatura user {sub.user_id}: {e}")
@@ -595,57 +1422,101 @@ class Database:
             logger.error(f"Erro ao buscar assinatura user {user_id}: {e}")
             return None
 
-    # --- User Strategy Preferences ---
-    async def get_user_strategy_preference(self, user_id: int) -> Optional[UserStrategyPreference]:
-        await self.connect()
-        try:
-            async with self.pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT * FROM user_strategy_preferences WHERE user_id = $1", user_id
-                )
-                if row:
-                    return UserStrategyPreference(
-                        id=row["id"],
-                        user_id=row["user_id"],
-                        corners_strategy=row["corners_strategy"],
-                        cards_strategy=row["cards_strategy"],
-                        updated_at=row["updated_at"],
-                    )
-            return None
-        except Exception as e:
-            logger.error(f"Erro ao buscar preferencia de estrategia user {user_id}: {e}")
-            return None
+    async def mark_payment_processed(self, asaas_payment_id: str, event_group: str) -> bool:
+        """Marca um payment+grupo como processado. Retorna True se foi novo, False se já existia.
 
-    async def upsert_user_strategy_preference(
-        self, user_id: int, corners_strategy: str, cards_strategy: str
-    ) -> Optional[UserStrategyPreference]:
+        Usado pelo webhook do Asaas para deduplicar PAYMENT_CONFIRMED + PAYMENT_RECEIVED
+        (mesmo grupo 'confirmed') que chegam em sequência com o mesmo payment id e
+        disparariam e-mails duplicados. Eventos diferentes para o mesmo payment
+        (ex: refunded depois de confirmed) usam grupos distintos e não colidem.
+        """
+        if not asaas_payment_id:
+            return True
         await self.connect()
         try:
             async with self.pool.acquire() as conn:
                 row = await conn.fetchrow(
                     """
-                    INSERT INTO user_strategy_preferences (user_id, corners_strategy, cards_strategy, updated_at)
-                    VALUES ($1, $2, $3, NOW())
-                    ON CONFLICT (user_id) DO UPDATE SET
-                        corners_strategy = EXCLUDED.corners_strategy,
-                        cards_strategy = EXCLUDED.cards_strategy,
-                        updated_at = NOW()
-                    RETURNING *
+                    INSERT INTO processed_payments (asaas_payment_id, event_group)
+                    VALUES ($1, $2)
+                    ON CONFLICT (asaas_payment_id, event_group) DO NOTHING
+                    RETURNING asaas_payment_id
                     """,
-                    user_id, corners_strategy, cards_strategy,
+                    asaas_payment_id, event_group,
                 )
-                if row:
-                    return UserStrategyPreference(
-                        id=row["id"],
-                        user_id=row["user_id"],
-                        corners_strategy=row["corners_strategy"],
-                        cards_strategy=row["cards_strategy"],
-                        updated_at=row["updated_at"],
-                    )
-            return None
+                return row is not None
         except Exception as e:
-            logger.error(f"Erro ao salvar preferencia de estrategia user {user_id}: {e}")
-            return None
+            logger.error(f"Erro ao marcar payment {asaas_payment_id}/{event_group}: {e}")
+            return True
+
+    # --- User Strategy Preferences ---
+    VALID_MARKETS = ("corners", "cards")
+    VALID_STRATEGIES = ("conservative", "moderate", "aggressive", "brute")
+    DEFAULT_STRATEGY = "moderate"
+
+    async def get_user_strategy(self, user_id: int, market: str) -> str:
+        """Return the user's strategy tier for the given market.
+
+        Falls back to 'moderate' when no row exists. Raises ValueError on
+        unknown market.
+        """
+        if market not in self.VALID_MARKETS:
+            raise ValueError(f"Invalid market: {market}. Must be one of {self.VALID_MARKETS}")
+        await self.connect()
+        async with self.pool.acquire() as conn:
+            value = await conn.fetchval(
+                "SELECT strategy FROM user_strategy_preference WHERE user_id = $1 AND market = $2",
+                user_id, market,
+            )
+        return value if value else self.DEFAULT_STRATEGY
+
+    async def set_user_strategy(self, user_id: int, market: str, strategy: str) -> UserStrategyPreference:
+        """Upsert the user's strategy tier for a given market. Returns the saved row."""
+        if market not in self.VALID_MARKETS:
+            raise ValueError(f"Invalid market: {market}. Must be one of {self.VALID_MARKETS}")
+        if strategy not in self.VALID_STRATEGIES:
+            raise ValueError(f"Invalid strategy: {strategy}. Must be one of {self.VALID_STRATEGIES}")
+        await self.connect()
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO user_strategy_preference (user_id, market, strategy, updated_at)
+                VALUES ($1, $2, $3, NOW())
+                ON CONFLICT (user_id, market) DO UPDATE SET
+                    strategy = EXCLUDED.strategy,
+                    updated_at = NOW()
+                RETURNING user_id, market, strategy, updated_at
+                """,
+                user_id, market, strategy,
+            )
+        return UserStrategyPreference(
+            user_id=row["user_id"],
+            market=row["market"],
+            strategy=row["strategy"],
+            updated_at=row["updated_at"],
+        )
+
+    async def get_user_strategies(self, user_id: int) -> Dict[str, str]:
+        """Return a dict {market: strategy} for all markets, filling defaults."""
+        await self.connect()
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT market, strategy FROM user_strategy_preference WHERE user_id = $1",
+                user_id,
+            )
+        result = {market: self.DEFAULT_STRATEGY for market in self.VALID_MARKETS}
+        for row in rows:
+            result[row["market"]] = row["strategy"]
+        return result
+
+    async def get_user_strategy_preference_updated_at(self, user_id: int) -> Optional[datetime]:
+        """Latest updated_at across the user's preference rows, or None."""
+        await self.connect()
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval(
+                "SELECT MAX(updated_at) FROM user_strategy_preference WHERE user_id = $1",
+                user_id,
+            )
 
     # --- Snapshots (Backtest - Sprint 3) ---
     async def salvar_snapshot(self, jogo: JogoAoVivo):
