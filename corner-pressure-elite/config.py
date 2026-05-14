@@ -227,11 +227,11 @@ WEBSHARE_PROXIES = os.getenv("WEBSHARE_PROXIES", "")
 # Default OFF: comportamento idêntico à USE_NEW_PROVIDERS legacy.
 USE_BETANO_BRIDGE = os.getenv("USE_BETANO_BRIDGE", "false").lower() == "true"
 BETANO_BRIDGE_URL = os.getenv("BETANO_BRIDGE_URL", "http://localhost:8080")
-# Bridge demora 14-18s por consulta; margem pra timeout total.
+# Pós-otimização Fase 2a.1 o bridge faz ~9-12s/consulta; margem pra timeout total.
 BETANO_BRIDGE_TIMEOUT_SEC = float(os.getenv("BETANO_BRIDGE_TIMEOUT_SEC", "25.0"))
 BETANO_BRIDGE_RETRIES = int(os.getenv("BETANO_BRIDGE_RETRIES", "1"))
 # Janela de hidratação Vue passada como query param `capture_seconds`.
-BETANO_BRIDGE_CAPTURE_SEC = float(os.getenv("BETANO_BRIDGE_CAPTURE_SEC", "15.0"))
+BETANO_BRIDGE_CAPTURE_SEC = float(os.getenv("BETANO_BRIDGE_CAPTURE_SEC", "5.0"))
 # Política de seleção de linha central quando o adapter consome o catálogo
 # (/markets, line=None). Escolhe a linha cujo over_price cai na faixa
 # [MIN, MAX]; se nenhuma cai, degrada pra mais próxima do centro da faixa.
