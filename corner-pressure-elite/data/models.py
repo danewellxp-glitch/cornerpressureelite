@@ -22,6 +22,13 @@ class JogoAoVivo:
     odd_atual: float = 0.0
     odd_betano: float = 0.0   # Betano (bookmaker 46)
     odd_bet365: float = 0.0   # Bet365 (bookmaker 8)
+    # Rastreabilidade (2026-05-11): de onde veio a linha + linhas alternativas
+    bookmaker_usado: str = ""  # 'betano' | 'bet365' | 'consolidada' | ''
+    linha_betano: float = 0.0
+    linha_bet365: float = 0.0
+    # Fonte única quando o CompositeOddsProvider é usado (USE_BETANO_BRIDGE):
+    # 'betano_bridge' | 'apifootball'. None = caminho legado multi-bookmaker.
+    odds_source: Optional[str] = None
 
     # Estatisticas recentes (ultimos 10 min)
     escanteios_ultimos_10min: int = 0
@@ -47,7 +54,14 @@ class JogoAoVivo:
     faltas_fora: int = 0
     linha_cartoes: float = 0.0
     odd_cartoes: float = 0.0
+    # Fonte única das odds de cartões quando via CompositeOddsProvider.
+    odds_source_cartoes: Optional[str] = None
     media_historica_cartoes: float = 0.0
+
+    # Kickoff (origem API-Football fixture.date, ISO 8601). Usado pelos
+    # providers Betano/Sportradar (Fase B/C) para mapear fixture→event_id por
+    # janela de horário.
+    kickoff_at: Optional[datetime] = None
 
     @property
     def descricao(self) -> str:
@@ -200,9 +214,59 @@ class Subscription:
 
 @dataclass
 class UserStrategyPreference:
+    user_id: int = 0
+    strategy: str = "moderate"  # conservative, moderate, aggressive, brute
+    market: str = "corners"     # corners, cards
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
+# ============= Robô Auto-Aposta =============
+
+@dataclass
+class BotConfig:
+    user_id: int = 0
+    enabled: bool = False
+    mode: str = "paper"  # 'paper' | 'real'
+    bet_house: Optional[str] = None  # 'betano' | 'bet365' | 'kto'
+    banca_inicial_cents: int = 0
+    banca_atual_cents: int = 0
+    max_loss_per_day_cents: int = 0
+    max_bets_per_day: int = 0
+    unit_pct: float = 0.01
+    allowed_leagues: list = field(default_factory=list)
+    allowed_markets: list = field(default_factory=list)
+    kill_switch: bool = False
+    real_mode_unlocked: bool = False
+    accepted_tos_at: Optional[datetime] = None
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class BetHouseCredential:
+    user_id: int = 0
+    bet_house: str = ""
+    username_ct: bytes = b""
+    password_ct: bytes = b""
+    nonce: bytes = b""
+    last_validated_at: Optional[datetime] = None
+    status: str = "unverified"  # 'unverified' | 'valid' | 'invalid'
+
+
+@dataclass
+class Bet:
     id: Optional[int] = None
     user_id: int = 0
-    corners_strategy: str = "moderate"  # conservative, moderate, aggressive, brute
-    cards_strategy: str = "moderate"
-    updated_at: datetime = field(default_factory=datetime.now)
+    signal_id: Optional[int] = None
+    market: str = ""  # 'corners' | 'cards'
+    bet_house: Optional[str] = None  # None = paper
+    bet_house_bet_id: Optional[str] = None
+    mode: str = "paper"  # 'paper' | 'real'
+    stake_cents: int = 0
+    odd: float = 0.0
+    linha: float = 0.0
+    selecao: str = ""  # 'over' | 'under'
+    status: str = "open"  # open | won | lost | cashed_out | error | canceled
+    payout_cents: int = 0
+    placed_at: datetime = field(default_factory=datetime.now)
+    settled_at: Optional[datetime] = None
 
