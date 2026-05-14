@@ -49,14 +49,16 @@ class _FakeOdds:
         self.corners_calls = 0
         self.cards_calls = 0
 
-    async def get_corners(self, fixture, current_score):
+    async def get_corners(self, fixture, current_score, line):
         self.corners_calls += 1
+        self.last_line = line
         if self._raises:
             raise RuntimeError("boom")
         return self._corners
 
-    async def get_cards(self, fixture, current_score):
+    async def get_cards(self, fixture, current_score, line):
         self.cards_calls += 1
+        self.last_line = line
         if self._raises:
             raise RuntimeError("boom")
         return self._cards
@@ -70,7 +72,7 @@ async def test_composite_returns_primary_when_available():
     p1 = _FakeOdds("p1", corners=_ou("p1", linha=9.5))
     p2 = _FakeOdds("p2", corners=_ou("p2", linha=10.5))
     comp = CompositeOddsProvider([p1, p2])
-    res = await comp.get_corners(_fixture(), current_score=0)
+    res = await comp.get_corners(_fixture(), current_score=0, line=9.5)
     assert res is not None
     assert res.source == "p1"
     assert p1.corners_calls == 1
@@ -83,7 +85,7 @@ async def test_composite_falls_back_when_primary_returns_none():
     p1 = _FakeOdds("p1", corners=None)
     p2 = _FakeOdds("p2", corners=_ou("p2"))
     comp = CompositeOddsProvider([p1, p2])
-    res = await comp.get_corners(_fixture(), current_score=0)
+    res = await comp.get_corners(_fixture(), current_score=0, line=9.5)
     assert res is not None
     assert res.source == "p2"
     assert p1.corners_calls == 1
@@ -95,7 +97,7 @@ async def test_composite_falls_back_when_primary_raises():
     p1 = _FakeOdds("p1", raises=True)
     p2 = _FakeOdds("p2", corners=_ou("p2"))
     comp = CompositeOddsProvider([p1, p2])
-    res = await comp.get_corners(_fixture(), current_score=0)
+    res = await comp.get_corners(_fixture(), current_score=0, line=9.5)
     assert res is not None
     assert res.source == "p2"
 
@@ -105,7 +107,7 @@ async def test_composite_returns_none_when_all_fail():
     p1 = _FakeOdds("p1", corners=None)
     p2 = _FakeOdds("p2", corners=None)
     comp = CompositeOddsProvider([p1, p2])
-    assert await comp.get_corners(_fixture(), current_score=0) is None
+    assert await comp.get_corners(_fixture(), current_score=0, line=9.5) is None
 
 
 @pytest.mark.asyncio
@@ -117,7 +119,7 @@ async def test_composite_drift_check_calls_all_providers_and_writes_jsonl(tmp_pa
     p2 = _FakeOdds("apifootball", corners=_ou("apifootball", linha=9.5, over=1.90))
     comp = CompositeOddsProvider([p1, p2], drift_check=True)
 
-    res = await comp.get_corners(_fixture(7), current_score=0)
+    res = await comp.get_corners(_fixture(7), current_score=0, line=9.5)
     assert res is not None
     assert res.source == "betano"
     assert p1.corners_calls == 1
@@ -137,7 +139,7 @@ async def test_composite_drift_check_skips_jsonl_when_only_one_responds(tmp_path
     p1 = _FakeOdds("betano", corners=_ou("betano"))
     p2 = _FakeOdds("apifootball", corners=None)
     comp = CompositeOddsProvider([p1, p2], drift_check=True)
-    res = await comp.get_corners(_fixture(), current_score=0)
+    res = await comp.get_corners(_fixture(), current_score=0, line=9.5)
     assert res is not None
     assert not drift_log.exists()
 
@@ -174,7 +176,7 @@ async def test_composite_persistence_worker_receives_primary(monkeypatch):
 
     p1 = _FakeOdds("betano", corners=_ou("betano"))
     comp = CompositeOddsProvider([p1], persistence_worker=_FakeWorker())
-    res = await comp.get_corners(_fixture(99), current_score=0)
+    res = await comp.get_corners(_fixture(99), current_score=0, line=9.5)
     assert res is not None
     assert calls == [{"fixture_id": 99, "market_kind": "corners",
                        "source": "betano", "n_results": 1}]

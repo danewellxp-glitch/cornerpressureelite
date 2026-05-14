@@ -124,7 +124,7 @@ async def test_quote_ok_returns_snapshot_corners():
         client=client, fixture_repo=_FakeRepo({100: "84592546"})
     )
 
-    res = await adapter.get_corners(_fixture(), current_score=0)
+    res = await adapter.get_corners(_fixture(), current_score=0, line=9.5)
 
     assert res is not None
     assert isinstance(res, CanonicalOverUnder)
@@ -136,6 +136,8 @@ async def test_quote_ok_returns_snapshot_corners():
     # Fez 2 chamadas, uma por side
     assert len(client.calls) == 2
     assert {c["side"] for c in client.calls} == {"over", "under"}
+    # Fase 3: line passada pela engine vai literal pro client
+    assert all(c["line"] == 9.5 for c in client.calls)
 
 
 @pytest.mark.asyncio
@@ -148,14 +150,13 @@ async def test_quote_ok_returns_snapshot_cards():
         client=client, fixture_repo=_FakeRepo({100: "84592546"})
     )
 
-    res = await adapter.get_cards(_fixture(), current_score=0)
+    res = await adapter.get_cards(_fixture(), current_score=0, line=3.5)
 
     assert res is not None
     assert res.source == "betano_bridge"
     assert res.market_kind == "cards"
     assert res.linha == 3.5
     assert res.odd_over == 1.85
-    # Default line de cards é 3.5
     assert all(c["line"] == 3.5 for c in client.calls)
 
 
@@ -166,7 +167,7 @@ async def test_quote_404_returns_none():
     adapter = BetanoBridgeOddsAdapter(
         client=client, fixture_repo=_FakeRepo({100: "84592546"})
     )
-    assert await adapter.get_corners(_fixture(), current_score=0) is None
+    assert await adapter.get_corners(_fixture(), current_score=0, line=9.5) is None
 
 
 @pytest.mark.asyncio
@@ -180,7 +181,7 @@ async def test_quote_timeout_returns_none():
         client=real_client, fixture_repo=_FakeRepo({100: "84592546"})
     )
 
-    res = await adapter.get_corners(_fixture(), current_score=0)
+    res = await adapter.get_corners(_fixture(), current_score=0, line=9.5)
     assert res is None
     await real_client.close()
 
@@ -196,7 +197,7 @@ async def test_quote_connection_error_returns_none():
         client=real_client, fixture_repo=_FakeRepo({100: "84592546"})
     )
 
-    res = await adapter.get_corners(_fixture(), current_score=0)
+    res = await adapter.get_corners(_fixture(), current_score=0, line=9.5)
     assert res is None
     await real_client.close()
 
@@ -209,7 +210,7 @@ async def test_fixture_without_betano_event_id_returns_none_no_http():
         client=client, fixture_repo=_FakeRepo({})  # vazio
     )
 
-    res = await adapter.get_corners(_fixture(), current_score=0)
+    res = await adapter.get_corners(_fixture(), current_score=0, line=9.5)
     assert res is None
     assert client.calls == []
 
@@ -225,13 +226,13 @@ async def test_composite_falls_back_to_apifootball_on_bridge_error():
     class _StubAF:
         name = "apifootball"
 
-        async def get_corners(self, fixture, current_score):
+        async def get_corners(self, fixture, current_score, line):
             return CanonicalOverUnder(
                 source="apifootball", market_kind="corners", market_code="",
                 linha=10.5, odd_over=1.92, odd_under=1.88,
             )
 
-        async def get_cards(self, fixture, current_score):
+        async def get_cards(self, fixture, current_score, line):
             return None
 
         async def healthcheck(self):
@@ -240,7 +241,42 @@ async def test_composite_falls_back_to_apifootball_on_bridge_error():
     af = _StubAF()
     composite = CompositeOddsProvider([bridge, af])
 
-    res = await composite.get_corners(_fixture(), current_score=0)
+    res = await composite.get_corners(_fixture(), current_score=0, line=9.5)
     assert res is not None
     assert res.source == "apifootball"
     assert res.linha == 10.5
+
+
+# ─── Testes novos da Fase 3: line negociável ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_bridge_get_corners_uses_provided_line():
+    """Engine passa line=5.5 (Liga MX) — bridge recebe exatamente 5.5, não 9.5."""
+    client = _FakeClient(responses={
+        ("corners_over_under", "over"): _ok_payload("over", line=5.5),
+        ("corners_over_under", "under"): _ok_payload("under", line=5.5),
+    })
+    adapter = BetanoBridgeOddsAdapter(
+        client=client, fixture_repo=_FakeRepo({100: "84592546"})
+    )
+
+    res = await adapter.get_corners(_fixture(), current_score=0, line=5.5)
+
+    assert res is not None
+    assert res.linha == 5.5
+    assert all(c["line"] == 5.5 for c in client.calls)
+    # Garante que NÃO usou 9.5 hardcoded
+    assert not any(c["line"] == 9.5 for c in client.calls)
+
+
+@pytest.mark.asyncio
+async def test_bridge_get_corners_line_unavailable_returns_none():
+    """Engine pede line=99.5 (inexistente) → bridge 404 → adapter retorna None."""
+    client = _FakeClient(raises=BridgeMarketNotFound("line=99.5 not offered"))
+    adapter = BetanoBridgeOddsAdapter(
+        client=client, fixture_repo=_FakeRepo({100: "84592546"})
+    )
+
+    res = await adapter.get_corners(_fixture(), current_score=0, line=99.5)
+    assert res is None

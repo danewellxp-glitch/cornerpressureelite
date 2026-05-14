@@ -95,7 +95,7 @@ async def test_betano_odds_respects_min_score_threshold():
     markets = _MarketsStub()
     catalog = _CatalogStub()
     prov = BetanoOddsProvider(session=None, markets=markets, catalog=catalog, min_score=2)
-    res = await prov.get_corners(_fixture(), current_score=1)
+    res = await prov.get_corners(_fixture(), current_score=1, line=9.5)
     assert res is None
     assert markets.corners_calls == 0
     assert catalog.find_calls == 0
@@ -107,8 +107,8 @@ async def test_betano_odds_caches_event_id_after_first_resolve():
     catalog = _CatalogStub(found_event_id=999)
     prov = BetanoOddsProvider(session=None, markets=markets, catalog=catalog)
     fx = _fixture()
-    r1 = await prov.get_corners(fx, current_score=0)
-    r2 = await prov.get_corners(fx, current_score=0)
+    r1 = await prov.get_corners(fx, current_score=0, line=9.5)
+    r2 = await prov.get_corners(fx, current_score=0, line=9.5)
     assert r1 is not None and r2 is not None
     assert catalog.find_calls == 1  # cache hit na 2ª
     assert markets.corners_calls == 2
@@ -120,7 +120,7 @@ async def test_betano_odds_to_canonical_preserves_market_code():
     markets.corners_result = _bou(linha=10.5, over=1.62, under=2.30)
     catalog = _CatalogStub()
     prov = BetanoOddsProvider(session=None, markets=markets, catalog=catalog)
-    res = await prov.get_corners(_fixture(), current_score=0)
+    res = await prov.get_corners(_fixture(), current_score=0, line=9.5)
     assert res is not None
     assert res.source == "betano"
     assert res.market_code == "CNOU"
@@ -135,7 +135,7 @@ async def test_betano_odds_uses_repo_before_catalog():
     repo = _RepoStub(stored=42)
     prov = BetanoOddsProvider(session=None, markets=markets, catalog=catalog,
                                fixture_repo=repo)
-    res = await prov.get_corners(_fixture(), current_score=0)
+    res = await prov.get_corners(_fixture(), current_score=0, line=9.5)
     assert res is not None
     assert catalog.find_calls == 0
     assert repo.get_calls == 1
@@ -148,7 +148,7 @@ async def test_betano_odds_upserts_repo_after_fuzzy_match():
     repo = _RepoStub(stored=None)
     prov = BetanoOddsProvider(session=None, markets=markets, catalog=catalog,
                                fixture_repo=repo)
-    await prov.get_corners(_fixture(fid=123), current_score=0)
+    await prov.get_corners(_fixture(fid=123), current_score=0, line=9.5)
     assert repo.upsert_calls == 1
     assert repo.last_upsert["fixture_id"] == 123
     assert repo.last_upsert["betano_event_id"] == 84586925
@@ -159,6 +159,6 @@ async def test_betano_odds_returns_none_when_catalog_misses_and_no_repo():
     markets = _MarketsStub()
     catalog = _CatalogStub(found_event_id=None)
     prov = BetanoOddsProvider(session=None, markets=markets, catalog=catalog)
-    res = await prov.get_corners(_fixture(), current_score=0)
+    res = await prov.get_corners(_fixture(), current_score=0, line=9.5)
     assert res is None
     assert markets.corners_calls == 0
