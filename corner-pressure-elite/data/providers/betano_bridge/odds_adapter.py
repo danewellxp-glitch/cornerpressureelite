@@ -9,8 +9,9 @@ Sem `fixture_repo` configurado e sem cache → devolve `None` e o
 Convenções:
 - Captura toda exceção do client no boundary e devolve `None`
   (segue padrão de `APIFootballOddsProvider`).
-- Linhas default (9.5 escanteios, 3.5 cartões) — engine pode evoluir
-  pra passar linha negociável em fases futuras.
+- Linha vem do Protocol (Fase 3): engine calcula a linha alvo e passa
+  como parâmetro. Bridge consulta exatamente essa linha; se Betano não
+  oferece, devolve None e Composite cai pro próximo provider.
 """
 from __future__ import annotations
 
@@ -28,11 +29,6 @@ from data.providers.betano_bridge.exceptions import (
 )
 
 log = logging.getLogger("cpes.providers.betano_bridge.odds")
-
-DEFAULT_LINES = {
-    "corners_over_under": 9.5,
-    "cards_over_under": 3.5,
-}
 
 
 class BetanoBridgeOddsAdapter:
@@ -52,14 +48,14 @@ class BetanoBridgeOddsAdapter:
         self._event_id_cache: dict[int, str] = {}
 
     async def get_corners(
-        self, fixture: CanonicalFixture, current_score: int
+        self, fixture: CanonicalFixture, current_score: int, line: float
     ) -> Optional[CanonicalOverUnder]:
-        return await self._get_market(fixture, current_score, "corners_over_under", "corners")
+        return await self._get_market(fixture, current_score, line, "corners_over_under", "corners")
 
     async def get_cards(
-        self, fixture: CanonicalFixture, current_score: int
+        self, fixture: CanonicalFixture, current_score: int, line: float
     ) -> Optional[CanonicalOverUnder]:
-        return await self._get_market(fixture, current_score, "cards_over_under", "cards")
+        return await self._get_market(fixture, current_score, line, "cards_over_under", "cards")
 
     async def healthcheck(self) -> bool:
         try:
@@ -75,10 +71,17 @@ class BetanoBridgeOddsAdapter:
         self,
         fixture: CanonicalFixture,
         current_score: int,
+        line: float,
         bridge_market: str,
         market_kind: str,
     ) -> Optional[CanonicalOverUnder]:
         if current_score < self._min_score:
+            return None
+        if line is None or line <= 0:
+            log.debug(
+                "betano_bridge.invalid_line fixture=%d market=%s line=%s",
+                fixture.fixture_id, market_kind, line,
+            )
             return None
 
         event_id = await self._resolve_event_id(fixture)
@@ -87,10 +90,6 @@ class BetanoBridgeOddsAdapter:
                 "betano_bridge.no_event_id fixture=%d market=%s",
                 fixture.fixture_id, market_kind,
             )
-            return None
-
-        line = DEFAULT_LINES.get(bridge_market)
-        if line is None:
             return None
 
         t0 = time.perf_counter()

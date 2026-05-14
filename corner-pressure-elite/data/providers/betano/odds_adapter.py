@@ -42,7 +42,7 @@ class BetanoOddsProvider:
         self._event_id_cache: dict[int, int] = {}
 
     async def get_corners(
-        self, fixture: CanonicalFixture, current_score: int
+        self, fixture: CanonicalFixture, current_score: int, line: float
     ) -> Optional[CanonicalOverUnder]:
         if current_score < self._min_score:
             return None
@@ -50,10 +50,10 @@ class BetanoOddsProvider:
         if not event_id:
             return None
         ou = await self._markets.fetch_corners(event_id)
-        return self._to_canonical(ou, "corners") if ou else None
+        return self._to_canonical(ou, "corners", line) if ou else None
 
     async def get_cards(
-        self, fixture: CanonicalFixture, current_score: int
+        self, fixture: CanonicalFixture, current_score: int, line: float
     ) -> Optional[CanonicalOverUnder]:
         if current_score < self._min_score:
             return None
@@ -61,7 +61,7 @@ class BetanoOddsProvider:
         if not event_id:
             return None
         ou = await self._markets.fetch_cards(event_id)
-        return self._to_canonical(ou, "cards") if ou else None
+        return self._to_canonical(ou, "cards", line) if ou else None
 
     async def healthcheck(self) -> bool:
         try:
@@ -73,12 +73,21 @@ class BetanoOddsProvider:
 
     # ---- helpers ----
 
-    def _to_canonical(self, ou, market_kind: str) -> CanonicalOverUnder:
+    def _to_canonical(self, ou, market_kind: str, requested_line: float) -> CanonicalOverUnder:
+        # `markets.fetch_*` devolve a linha "principal" oferecida pela Betano;
+        # honrar `requested_line` exigiria endpoint diferente (catálogo). Por
+        # ora, devolve o que veio e loga aviso se não bater.
+        linha_real = float(ou.handicap)
+        if requested_line and abs(linha_real - requested_line) >= 0.5:
+            log.info(
+                "betano.odds.line_mismatch market=%s requested=%.1f returned=%.1f",
+                market_kind, requested_line, linha_real,
+            )
         return CanonicalOverUnder(
             source=self.name,
             market_kind=market_kind,
             market_code=ou.market_code,
-            linha=float(ou.handicap),
+            linha=linha_real,
             odd_over=float(ou.odd_over),
             odd_under=float(ou.odd_under),
         )

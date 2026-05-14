@@ -20,19 +20,19 @@ class APIFootballOddsProvider:
         self._c = api_client
 
     async def get_corners(
-        self, fixture: CanonicalFixture, current_score: int
+        self, fixture: CanonicalFixture, current_score: int, line: float
     ) -> Optional[CanonicalOverUnder]:
         raw = await self._c.get_live_odds(fixture.fixture_id)
-        return self._to_canonical(raw, market_kind="corners")
+        return self._to_canonical(raw, market_kind="corners", requested_line=line)
 
     async def get_cards(
-        self, fixture: CanonicalFixture, current_score: int
+        self, fixture: CanonicalFixture, current_score: int, line: float
     ) -> Optional[CanonicalOverUnder]:
         raw = await self._c.get_live_odds_cards(fixture.fixture_id)
-        return self._to_canonical(raw, market_kind="cards")
+        return self._to_canonical(raw, market_kind="cards", requested_line=line)
 
     def _to_canonical(
-        self, raw: Optional[dict], market_kind: str
+        self, raw: Optional[dict], market_kind: str, requested_line: float
     ) -> Optional[CanonicalOverUnder]:
         if not raw:
             return None
@@ -48,6 +48,14 @@ class APIFootballOddsProvider:
             return None
         if linha <= 0 or odd_over <= 0 or odd_under <= 0:
             return None
+        # API-Football retorna 1 linha "principal" por fixture; não dá pra
+        # filtrar entre múltiplas. Devolve o que veio. Se diferir do que a
+        # engine pediu, loga aviso — engine recalcula edge com a `linha` real.
+        if requested_line and abs(linha - requested_line) >= 0.5:
+            log.info(
+                "apifootball.odds.line_mismatch market=%s requested=%.1f returned=%.1f",
+                market_kind, requested_line, linha,
+            )
         return CanonicalOverUnder(
             source=self.name,
             market_kind=market_kind,
