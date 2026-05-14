@@ -51,8 +51,46 @@ async def build_providers(
     af_odds = APIFootballOddsProvider(api_client)
     af_stats = APIFootballStatsProvider(api_client)
 
+    use_bridge = bool(getattr(settings, "USE_BETANO_BRIDGE", False))
     use_new = bool(getattr(settings, "USE_NEW_PROVIDERS", False))
     drift = bool(getattr(settings, "DRIFT_CHECK_PROVIDERS", False))
+
+    if use_bridge:
+        if use_new:
+            log.warning(
+                "providers.bridge.coexists USE_BETANO_BRIDGE e USE_NEW_PROVIDERS=True — bridge ganha"
+            )
+        from .betano_bridge import BetanoBridgeClient, BetanoBridgeOddsAdapter
+
+        bridge_client = BetanoBridgeClient(
+            base_url=getattr(settings, "BETANO_BRIDGE_URL", "http://localhost:8080"),
+            timeout_sec=float(getattr(settings, "BETANO_BRIDGE_TIMEOUT_SEC", 25.0)),
+            capture_sec=float(getattr(settings, "BETANO_BRIDGE_CAPTURE_SEC", 15.0)),
+            retries=int(getattr(settings, "BETANO_BRIDGE_RETRIES", 1)),
+        )
+        min_score = int(getattr(settings, "MIN_SCORE_TO_FETCH_ODDS", 0))
+        bridge_odds = BetanoBridgeOddsAdapter(
+            client=bridge_client,
+            fixture_repo=fixture_repo,
+            min_score=min_score,
+        )
+
+        async def _bridge_shutdown() -> None:
+            await bridge_client.close()
+
+        log.info(
+            "providers.bridge_stack primary=betano_bridge fallback=apifootball drift=%s min_score=%d",
+            drift, min_score,
+        )
+        return (
+            CompositeOddsProvider(
+                [bridge_odds, af_odds],
+                drift_check=drift,
+                persistence_worker=odds_persistence_worker,
+            ),
+            CompositeStatsProvider([af_stats], drift_check=drift),
+            _bridge_shutdown,
+        )
 
     if not use_new:
         log.info("providers.legacy stack=apifootball-only drift=%s", drift)
