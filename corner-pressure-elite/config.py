@@ -232,3 +232,8 @@ BETANO_BRIDGE_TIMEOUT_SEC = float(os.getenv("BETANO_BRIDGE_TIMEOUT_SEC", "25.0")
 BETANO_BRIDGE_RETRIES = int(os.getenv("BETANO_BRIDGE_RETRIES", "1"))
 # Janela de hidratação Vue passada como query param `capture_seconds`.
 BETANO_BRIDGE_CAPTURE_SEC = float(os.getenv("BETANO_BRIDGE_CAPTURE_SEC", "15.0"))
+# Política de seleção de linha central quando o adapter consome o catálogo
+# (/markets, line=None). Escolhe a linha cujo over_price cai na faixa
+# [MIN, MAX]; se nenhuma cai, degrada pra mais próxima do centro da faixa.
+BETANO_BRIDGE_PREFERRED_ODD_MIN = float(os.getenv("BETANO_BRIDGE_PREFERRED_ODD_MIN", "1.50"))
+BETANO_BRIDGE_PREFERRED_ODD_MAX = float(os.getenv("BETANO_BRIDGE_PREFERRED_ODD_MAX", "1.70"))
