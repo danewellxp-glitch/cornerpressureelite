@@ -20,19 +20,21 @@ class APIFootballOddsProvider:
         self._c = api_client
 
     async def get_corners(
-        self, fixture: CanonicalFixture, current_score: int, line: float
+        self, fixture: CanonicalFixture, current_score: int,
+        line: Optional[float] = None,
     ) -> Optional[CanonicalOverUnder]:
         raw = await self._c.get_live_odds(fixture.fixture_id)
         return self._to_canonical(raw, market_kind="corners", requested_line=line)
 
     async def get_cards(
-        self, fixture: CanonicalFixture, current_score: int, line: float
+        self, fixture: CanonicalFixture, current_score: int,
+        line: Optional[float] = None,
     ) -> Optional[CanonicalOverUnder]:
         raw = await self._c.get_live_odds_cards(fixture.fixture_id)
         return self._to_canonical(raw, market_kind="cards", requested_line=line)
 
     def _to_canonical(
-        self, raw: Optional[dict], market_kind: str, requested_line: float
+        self, raw: Optional[dict], market_kind: str, requested_line: Optional[float]
     ) -> Optional[CanonicalOverUnder]:
         if not raw:
             return None

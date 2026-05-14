@@ -42,7 +42,8 @@ class BetanoOddsProvider:
         self._event_id_cache: dict[int, int] = {}
 
     async def get_corners(
-        self, fixture: CanonicalFixture, current_score: int, line: float
+        self, fixture: CanonicalFixture, current_score: int,
+        line: Optional[float] = None,
     ) -> Optional[CanonicalOverUnder]:
         if current_score < self._min_score:
             return None
@@ -53,7 +54,8 @@ class BetanoOddsProvider:
         return self._to_canonical(ou, "corners", line) if ou else None
 
     async def get_cards(
-        self, fixture: CanonicalFixture, current_score: int, line: float
+        self, fixture: CanonicalFixture, current_score: int,
+        line: Optional[float] = None,
     ) -> Optional[CanonicalOverUnder]:
         if current_score < self._min_score:
             return None
@@ -73,7 +75,7 @@ class BetanoOddsProvider:
 
     # ---- helpers ----
 
-    def _to_canonical(self, ou, market_kind: str, requested_line: float) -> CanonicalOverUnder:
+    def _to_canonical(self, ou, market_kind: str, requested_line: Optional[float]) -> CanonicalOverUnder:
         # `markets.fetch_*` devolve a linha "principal" oferecida pela Betano;
         # honrar `requested_line` exigiria endpoint diferente (catálogo). Por
         # ora, devolve o que veio e loga aviso se não bater.
