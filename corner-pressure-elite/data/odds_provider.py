@@ -49,11 +49,11 @@ class OddsProvider(Protocol):
     name: str
 
     async def get_corners(
-        self, fixture: CanonicalFixture, current_score: int
+        self, fixture: CanonicalFixture, current_score: int, line: float
     ) -> Optional[CanonicalOverUnder]: ...
 
     async def get_cards(
-        self, fixture: CanonicalFixture, current_score: int
+        self, fixture: CanonicalFixture, current_score: int, line: float
     ) -> Optional[CanonicalOverUnder]: ...
 
     async def healthcheck(self) -> bool: ...
@@ -82,14 +82,14 @@ class CompositeOddsProvider:
         self._persistence = persistence_worker
 
     async def get_corners(
-        self, fixture: CanonicalFixture, current_score: int
+        self, fixture: CanonicalFixture, current_score: int, line: float
     ) -> Optional[CanonicalOverUnder]:
-        return await self._dispatch("get_corners", fixture, current_score, "corners")
+        return await self._dispatch("get_corners", fixture, current_score, line, "corners")
 
     async def get_cards(
-        self, fixture: CanonicalFixture, current_score: int
+        self, fixture: CanonicalFixture, current_score: int, line: float
     ) -> Optional[CanonicalOverUnder]:
-        return await self._dispatch("get_cards", fixture, current_score, "cards")
+        return await self._dispatch("get_cards", fixture, current_score, line, "cards")
 
     async def healthcheck(self) -> bool:
         for p in self._providers:
@@ -101,16 +101,16 @@ class CompositeOddsProvider:
         return False
 
     async def _dispatch(
-        self, method: str, fixture: CanonicalFixture, score: int, market_kind: str
+        self, method: str, fixture: CanonicalFixture, score: int, line: float, market_kind: str
     ) -> Optional[CanonicalOverUnder]:
         results: list[tuple[str, Optional[CanonicalOverUnder]]] = []
         for p in self._providers:
             try:
-                r = await getattr(p, method)(fixture, score)
+                r = await getattr(p, method)(fixture, score, line)
             except Exception as e:  # fronteira: provider externo
                 log.warning(
-                    "composite.%s.%s.error fixture=%d err=%s",
-                    p.name, method, fixture.fixture_id, e,
+                    "composite.%s.%s.error fixture=%d line=%s err=%s",
+                    p.name, method, fixture.fixture_id, line, e,
                 )
                 r = None
             results.append((p.name, r))
