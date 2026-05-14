@@ -11,6 +11,11 @@ class MessageFormatter:
     """Formata sinais e alertas para mensagens WhatsApp."""
 
     @staticmethod
+    def _fmt_odd(odd: float) -> str:
+        """Formata odd: mostra valor ou N/D se zero."""
+        return f"{odd:.2f}x" if odd > 0 else "N/D"
+
+    @staticmethod
     def format_signal(sinal: Sinal) -> str:
         jogo = sinal.jogo
         emoji = "\U0001f525" if sinal.tipo == "PREMIUM" else "\U0001f7e1"
@@ -20,6 +25,45 @@ class MessageFormatter:
             if sinal.tipo == "PREMIUM"
             else "ENTRADA NORMAL"
         )
+
+        # Fonte das odds: \u00fanica (CompositeOddsProvider/bridge) ou multi-bookmaker
+        # (caminho legado). odds_source setado => mostra s\u00f3 a fonte usada.
+        if jogo.odds_source in ("betano_bridge", "apifootball"):
+            fonte_linha = (
+                "Betano" if jogo.odds_source == "betano_bridge" else "API-Football"
+            )
+            odds_block = f"{fonte_linha}: {MessageFormatter._fmt_odd(jogo.odd_atual)}\n"
+            alt_block = ""
+        else:
+            betano_str = MessageFormatter._fmt_odd(jogo.odd_betano)
+            bet365_str = MessageFormatter._fmt_odd(jogo.odd_bet365)
+
+            # Identifica de onde veio a linha (rastreabilidade pro user)
+            bm_usado = (jogo.bookmaker_usado or "").lower()
+            if bm_usado == "betano":
+                fonte_linha = "Betano"
+            elif bm_usado == "bet365":
+                fonte_linha = "Bet365"
+            elif bm_usado == "consolidada":
+                fonte_linha = "mercado consolidado"
+            else:
+                fonte_linha = "mercado"
+
+            odds_block = f"Betano: {betano_str}\nBet365: {bet365_str}\n"
+
+            # Mostra alternativas se forem DIFERENTES da linha escolhida
+            alt_lines = []
+            if jogo.linha_betano > 0 and jogo.linha_betano != jogo.linha_atual:
+                alt_lines.append(f"Betano: {jogo.linha_betano}")
+            if jogo.linha_bet365 > 0 and jogo.linha_bet365 != jogo.linha_atual:
+                alt_lines.append(f"Bet365: {jogo.linha_bet365}")
+            alt_block = ""
+            if alt_lines:
+                alt_block = (
+                    f"\u2139\ufe0f *Outras linhas dispon\u00edveis:*\n"
+                    + "\n".join(alt_lines)
+                    + "\n\n"
+                )
 
         msg = (
             f"{emoji} *OVER ESCANTEIOS \u2013 {tipo}*\n"
@@ -31,51 +75,113 @@ class MessageFormatter:
             f"\n"
             f"\U0001f4c8 *AN\u00c1LISE:*\n"
             f"Escanteios atuais: {jogo.escanteios_total}\n"
-            f"Linha (mercado): {jogo.linha_atual}\n"
+            f"Linha ({fonte_linha}): {jogo.linha_atual}\n"
             f"Proje\u00e7\u00e3o (CPES): {sinal.projecao}\n"
             f"Edge: +{sinal.edge:.2f}\n"
             f"\n"
             f"\U0001f525 *Pressure Score:* {sinal.pressure_score}/10\n"
             f"\n"
             f"\U0001f4b0 *MERCADO (Odds ao vivo):*\n"
-            f"Over: {jogo.odd_atual}x\n"
-            f"Linha: {jogo.linha_atual}\n"
+            f"{odds_block}"
+            f"Linha de refer\u00eancia: {jogo.linha_atual} ({fonte_linha})\n"
             f"Stake sugerida: 1u\n"
             f"\n"
+            f"{alt_block}"
+            f"\u26a0\ufe0f *Confira a linha na sua casa antes de apostar* \u2014 "
+            f"pode variar entre casas.\n"
             f"\u26a0\ufe0f *Tipo:* {tipo_footer}\n"
             f"\u23f0 {sinal.timestamp.strftime('%H:%M:%S')}"
         )
         return msg
 
     @staticmethod
-    def format_reevaluation(sinal_novo: Sinal, sinal_anterior: Sinal) -> str:
+    def format_reevaluation(
+        sinal_novo: Sinal,
+        sinal_anterior: Sinal,
+        entrada_adicional: bool = False,
+    ) -> str:
+        """Re-avaliacao concisa: so campos que MUDARAM, com delta explicito.
+        Sem 'X -> X' (ruido); mostra +N/-N pra ver a magnitude num relance.
+
+        Se `entrada_adicional=True`, adiciona tag indicando que a re-avalia\u00e7\u00e3o
+        tamb\u00e9m qualifica como oportunidade de entrada adicional (segunda
+        aposta opcional, stake reduzida).
+        """
         jogo = sinal_novo.jogo
         jogo_ant = sinal_anterior.jogo
 
+        header_tag = "\U0001f504 *RE-AVALIA\u00c7\u00c3O*"
+        if entrada_adicional:
+            header_tag += " + *ENTRADA ADICIONAL POSS\u00cdVEL*"
         msg = (
-            f"\U0001f504 *RE-EVALUATION \u2013 SCENARIO IMPROVED*\n"
+            f"{header_tag} \u2014 "
+            f"{jogo.time_casa} vs {jogo.time_fora}\n"
+            f"_{jogo.liga_nome}_  \u00b7  Min {jogo.minuto}' "
+            f"(alerta inicial: {jogo_ant.minuto}')\n"
             f"\n"
-            f"\U0001f3c6 *Liga:* {jogo.liga_nome}\n"
-            f"\u26bd *Jogo:* {jogo.time_casa} vs {jogo.time_fora}\n"
-            f"\u23f1\ufe0f *Minuto:* {jogo.minuto}' (Alerta inicial: {jogo_ant.minuto}')\n"
-            f"\n"
-            f"\U0001f4c8 *MUDAN\u00c7AS:*\n"
-            f"Escanteios: {jogo_ant.escanteios_total} \u2192 {jogo.escanteios_total}\n"
         )
+
+        d_esc = jogo.escanteios_total - jogo_ant.escanteios_total
+        if d_esc != 0:
+            msg += (
+                f"Escanteios: {jogo_ant.escanteios_total} \u2192 "
+                f"{jogo.escanteios_total} ({d_esc:+d})\n"
+            )
+
+        d_score = sinal_novo.pressure_score - sinal_anterior.pressure_score
+        if d_score != 0:
+            msg += (
+                f"Score: {sinal_anterior.pressure_score} \u2192 "
+                f"{sinal_novo.pressure_score} ({d_score:+d})\n"
+            )
+
+        d_edge = sinal_novo.edge - sinal_anterior.edge
+        if abs(d_edge) >= 0.05:
+            msg += (
+                f"Edge: +{sinal_anterior.edge:.2f} \u2192 "
+                f"+{sinal_novo.edge:.2f} ({d_edge:+.2f})\n"
+            )
+
+        d_proj = sinal_novo.projecao - sinal_anterior.projecao
+        if abs(d_proj) >= 0.1:
+            msg += (
+                f"Proje\u00e7\u00e3o: {sinal_anterior.projecao:.1f} \u2192 "
+                f"{sinal_novo.projecao:.1f} ({d_proj:+.1f})\n"
+            )
 
         if jogo_ant.linha_atual != jogo.linha_atual:
             msg += f"Linha: {jogo_ant.linha_atual} \u2192 {jogo.linha_atual}\n"
 
-        msg += (
-            f"Proje\u00e7\u00e3o: {sinal_anterior.projecao} \u2192 {sinal_novo.projecao}\n"
-            f"Edge: +{sinal_anterior.edge:.2f} \u2192 +{sinal_novo.edge:.2f}\n"
-            f"Score: {sinal_anterior.pressure_score} \u2192 {sinal_novo.pressure_score}\n"
-            f"\n"
-            f"\U0001f4a1 Cen\u00e1rio melhorou significativamente\n"
-            f"\u26a0\ufe0f Re-avalia\u00e7\u00e3o informativa apenas\n"
-            f"   (Sem sugest\u00e3o de stake adicional)\n"
-            f"\u23f0 {sinal_novo.timestamp.strftime('%H:%M:%S')}"
-        )
+        def _odd_line(nome: str, antes: float, depois: float) -> str:
+            if antes > 0 and depois > 0 and abs(depois - antes) >= 0.01:
+                d = depois - antes
+                return f"{nome}: {antes:.2f}x \u2192 {depois:.2f}x ({d:+.2f})\n"
+            if depois > 0:
+                return f"{nome}: {depois:.2f}x\n"
+            return ""
+
+        # Fonte única (Composite/bridge) ou multi-bookmaker (legado).
+        if jogo.odds_source in ("betano_bridge", "apifootball"):
+            fonte = (
+                "Betano" if jogo.odds_source == "betano_bridge" else "API-Football"
+            )
+            odds_block = _odd_line(fonte, jogo_ant.odd_atual, jogo.odd_atual)
+        else:
+            odds_block = (
+                _odd_line("Betano", jogo_ant.odd_betano, jogo.odd_betano)
+                + _odd_line("Bet365", jogo_ant.odd_bet365, jogo.odd_bet365)
+            )
+        if odds_block:
+            msg += f"\n*Odds*\n{odds_block}"
+
+        if entrada_adicional:
+            msg += (
+                "\n\u2728 *Cen\u00e1rio melhorou desde o alerta inicial*\n"
+                "Vale considerar uma entrada adicional opcional "
+                "(stake reduzida ~0.5u).\n"
+            )
+
+        msg += f"\n\u23f0 {sinal_novo.timestamp.strftime('%H:%M:%S')}"
         return msg
 
     @staticmethod
@@ -203,6 +309,7 @@ class MessageFormatter:
             "/status - Sa\u00fade do sistema\n"
             "/jogos - Pr\u00f3ximos jogos do dia\n"
             "/stats - Performance (greens, reds, ROI)\n"
+            "/strategy - Alterar nivel de estrategia\n"
             "/help - Esta mensagem\n"
             "\n"
             "_Aceita com ou sem / (ex: status ou /status)_"
