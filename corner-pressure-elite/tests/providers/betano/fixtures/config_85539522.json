@@ -1,0 +1,23 @@
+{
+  "meta": {
+    "version": "local"
+  },
+  "data": {
+    "provider_type": "Opta",
+    "disabled_tabs": [
+      {
+        "id": 5
+      }
+    ],
+    "teams": {
+      "home_team": {
+        "color": "#204d7c"
+      },
+      "away_team": {
+        "color": "#ffffff"
+      }
+    },
+    "momentum_enabled": true
+  },
+  "error": null
+}

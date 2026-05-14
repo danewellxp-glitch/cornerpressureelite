@@ -1,0 +1,231 @@
+{
+  "meta": {
+    "version": "local"
+  },
+  "data": {
+    "match": {
+      "id": "55n9jqpc9lsi0nxt4zpw29ez8",
+      "sportsbook_id": "84586925",
+      "home_team_id": "bd6vujl7jfv4wtc8gvo1o1t5y",
+      "home_team": "Cruzeiro EC",
+      "home_team_code": "CRU",
+      "home_team_color": "#2572e4",
+      "away_team_id": "5umkgpd22oex45aoco3wqgddl",
+      "away_team": "Goiás EC",
+      "away_team_code": "GOI",
+      "away_team_color": "#ffffff",
+      "coverage_level": "13",
+      "date": "2026-05-13T00:30:00.000Z",
+      "current_period": 2,
+      "league_name": "Copa do Brasil",
+      "kaizen_match_name": "Cruzeiro MG vs Goias GO",
+      "started": true,
+      "supports_pass_coordinates": true
+    },
+    "lineups": {
+      "home": {
+        "id": "108801",
+        "name": "Cruzeiro",
+        "name_short": "Cruzeiro",
+        "on_pitch": [
+          {
+            "id": "19263290",
+            "name": "Otavio Costa"
+          },
+          {
+            "id": "19298141",
+            "name": "Kaua Moraes"
+          },
+          {
+            "id": "19258919",
+            "name": "Jonathan Jesus"
+          },
+          {
+            "id": "19154175",
+            "name": "Fabricio Bruno"
+          },
+          {
+            "id": "19171792",
+            "name": "Kaiki Bruno"
+          },
+          {
+            "id": "18942174",
+            "name": "Lucas Romero"
+          },
+          {
+            "id": "19154029",
+            "name": "Gerson"
+          },
+          {
+            "id": "19283380",
+            "name": "Kenji"
+          },
+          {
+            "id": "18923125",
+            "name": "Matheus Pereira"
+          },
+          {
+            "id": "19231256",
+            "name": "Keny Arroyo"
+          },
+          {
+            "id": "19154137",
+            "name": "Kaio Jorge"
+          }
+        ],
+        "substitutes": [
+          {
+            "id": "19153940",
+            "name": "Christian Cardoso"
+          },
+          {
+            "id": "1038632",
+            "name": "Fágner"
+          },
+          {
+            "id": "19190880",
+            "name": "Matheus Cunha Queiroz"
+          },
+          {
+            "id": "19245786",
+            "name": "Japa"
+          },
+          {
+            "id": "18911286",
+            "name": "Wanderson Maciel"
+          },
+          {
+            "id": "19187712",
+            "name": "Joao Marcelo"
+          },
+          {
+            "id": "18933299",
+            "name": "Marquinhos"
+          },
+          {
+            "id": "19169480",
+            "name": "Bruno Rodrigues"
+          },
+          {
+            "id": "18951557",
+            "name": "Lucas Silva Borges"
+          },
+          {
+            "id": "18958374",
+            "name": "Luis Sinisterra"
+          },
+          {
+            "id": "19169353",
+            "name": "Lucas Villalba"
+          },
+          {
+            "id": "19316362",
+            "name": "Neiser Villareal"
+          }
+        ]
+      },
+      "away": {
+        "id": "109370",
+        "name": "Goiás",
+        "name_short": "Goiás",
+        "on_pitch": [
+          {
+            "id": "19200974",
+            "name": "Tadeu"
+          },
+          {
+            "id": "19321183",
+            "name": "Nicolas Vecchiato"
+          },
+          {
+            "id": "19198769",
+            "name": "Ramon Menezes"
+          },
+          {
+            "id": "18971150",
+            "name": "Lucas Ribeiro"
+          },
+          {
+            "id": "18936530",
+            "name": "Rodrigo Soares"
+          },
+          {
+            "id": "19175865",
+            "name": "Gege"
+          },
+          {
+            "id": "19270229",
+            "name": "Filipe Machado"
+          },
+          {
+            "id": "19296190",
+            "name": "Luquinhas"
+          },
+          {
+            "id": "19159231",
+            "name": "Lucas Lima"
+          },
+          {
+            "id": "19293066",
+            "name": "Kadu"
+          },
+          {
+            "id": "19276623",
+            "name": "Jean Carlos"
+          }
+        ],
+        "substitutes": [
+          {
+            "id": "18921048",
+            "name": "Anselmo Ramon"
+          },
+          {
+            "id": "19296191",
+            "name": "Baldoria"
+          },
+          {
+            "id": "19243192",
+            "name": "Diego Caito"
+          },
+          {
+            "id": "19263125",
+            "name": "Brayann Brito Batista"
+          },
+          {
+            "id": "19258917",
+            "name": "Luisao"
+          },
+          {
+            "id": "18941680",
+            "name": "Lourenco"
+          },
+          {
+            "id": "19259990",
+            "name": "Esli Garcia"
+          },
+          {
+            "id": "19190881",
+            "name": "Thiago Rodrigues"
+          },
+          {
+            "id": "19171665",
+            "name": "Djalma Silva"
+          },
+          {
+            "id": "19171494",
+            "name": "Bruno Savio"
+          },
+          {
+            "id": "19154436",
+            "name": "Luiz Felipe"
+          },
+          {
+            "id": "19161780",
+            "name": "Juninho"
+          }
+        ]
+      }
+    }
+  },
+  "error": null
+}

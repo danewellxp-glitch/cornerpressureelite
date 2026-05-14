@@ -1,0 +1,418 @@
+{
+  "meta": {
+    "version": "local"
+  },
+  "data": {
+    "home": {
+      "id": "108801",
+      "name": "Cruzeiro",
+      "name_short": null,
+      "formation": "4-2-3-1",
+      "captain_id": "18942174",
+      "coach_name": "Artur Jorge Torres Gomes Araújo Amorim",
+      "on_pitch": [
+        [
+          {
+            "id": 19263290,
+            "name": "Otavio Costa",
+            "number": 81,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          }
+        ],
+        [
+          {
+            "id": 19298141,
+            "name": "Kaua Moraes",
+            "number": 2,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          },
+          {
+            "id": 19154175,
+            "name": "Fabricio Bruno",
+            "number": 15,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          },
+          {
+            "id": 19258919,
+            "name": "Jonathan Jesus",
+            "number": 34,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          },
+          {
+            "id": 19171792,
+            "name": "Kaiki Bruno",
+            "number": 6,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          }
+        ],
+        [
+          {
+            "id": 18942174,
+            "name": "Lucas Romero",
+            "number": 29,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          },
+          {
+            "id": 19154029,
+            "name": "Gerson",
+            "number": 11,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          }
+        ],
+        [
+          {
+            "id": 19231256,
+            "name": "Keny Arroyo",
+            "number": 99,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          },
+          {
+            "id": 18923125,
+            "name": "Matheus Pereira",
+            "number": 10,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          },
+          {
+            "id": 19283380,
+            "name": "Kenji",
+            "number": 70,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          }
+        ],
+        [
+          {
+            "id": 19154137,
+            "name": "Kaio Jorge",
+            "number": 19,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          }
+        ]
+      ],
+      "substitutes": [],
+      "on_bench_substitutes": [
+        {
+          "id": 19153940,
+          "name": "Christian Cardoso",
+          "number": 88
+        },
+        {
+          "id": 1038632,
+          "name": "Fágner",
+          "number": 23
+        },
+        {
+          "id": 19190880,
+          "name": "Matheus Cunha Queiroz",
+          "number": 31
+        },
+        {
+          "id": 19245786,
+          "name": "Japa",
+          "number": 77
+        },
+        {
+          "id": 18911286,
+          "name": "Wanderson Maciel",
+          "number": 94
+        },
+        {
+          "id": 19187712,
+          "name": "Joao Marcelo",
+          "number": 43
+        },
+        {
+          "id": 18933299,
+          "name": "Marquinhos",
+          "number": 7
+        },
+        {
+          "id": 19169480,
+          "name": "Bruno Rodrigues",
+          "number": 9
+        },
+        {
+          "id": 18951557,
+          "name": "Lucas Silva Borges",
+          "number": 16
+        },
+        {
+          "id": 18958374,
+          "name": "Luis Sinisterra",
+          "number": 17
+        },
+        {
+          "id": 19169353,
+          "name": "Lucas Villalba",
+          "number": 25
+        },
+        {
+          "id": 19316362,
+          "name": "Neiser Villareal",
+          "number": 22
+        }
+      ],
+      "missing_players": []
+    },
+    "away": {
+      "id": "109370",
+      "name": "Goiás",
+      "name_short": null,
+      "formation": "4-3-1-2",
+      "captain_id": "19200974",
+      "coach_name": "Daniel Pollo Barioni",
+      "on_pitch": [
+        [
+          {
+            "id": 19200974,
+            "name": "Tadeu",
+            "number": 23,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          }
+        ],
+        [
+          {
+            "id": 18936530,
+            "name": "Rodrigo Soares",
+            "number": 2,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          },
+          {
+            "id": 18971150,
+            "name": "Lucas Ribeiro",
+            "number": 14,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          },
+          {
+            "id": 19198769,
+            "name": "Ramon Menezes",
+            "number": 4,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          },
+          {
+            "id": 19321183,
+            "name": "Nicolas Vecchiato",
+            "number": 6,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          }
+        ],
+        [
+          {
+            "id": 19296190,
+            "name": "Luquinhas",
+            "number": 35,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          },
+          {
+            "id": 19270229,
+            "name": "Filipe Machado",
+            "number": 5,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          },
+          {
+            "id": 19175865,
+            "name": "Gege",
+            "number": 28,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          }
+        ],
+        [
+          {
+            "id": 19159231,
+            "name": "Lucas Lima",
+            "number": 10,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          }
+        ],
+        [
+          {
+            "id": 19276623,
+            "name": "Jean Carlos",
+            "number": 21,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          },
+          {
+            "id": 19293066,
+            "name": "Kadu",
+            "number": 40,
+            "has_yellow_card": false,
+            "has_second_yellow_card": false,
+            "has_red_card": false,
+            "goals": 0,
+            "own_goals": 0,
+            "is_substituted": false
+          }
+        ]
+      ],
+      "substitutes": [],
+      "on_bench_substitutes": [
+        {
+          "id": 18921048,
+          "name": "Anselmo Ramon",
+          "number": 9
+        },
+        {
+          "id": 19296191,
+          "name": "Baldoria",
+          "number": 55
+        },
+        {
+          "id": 19243192,
+          "name": "Diego Caito",
+          "number": 20
+        },
+        {
+          "id": 19263125,
+          "name": "Brayann Brito Batista",
+          "number": 88
+        },
+        {
+          "id": 19258917,
+          "name": "Luisao",
+          "number": 25
+        },
+        {
+          "id": 18941680,
+          "name": "Lourenco",
+          "number": 97
+        },
+        {
+          "id": 19259990,
+          "name": "Esli Garcia",
+          "number": 15
+        },
+        {
+          "id": 19190881,
+          "name": "Thiago Rodrigues",
+          "number": 1
+        },
+        {
+          "id": 19171665,
+          "name": "Djalma Silva",
+          "number": 54
+        },
+        {
+          "id": 19171494,
+          "name": "Bruno Savio",
+          "number": 11
+        },
+        {
+          "id": 19154436,
+          "name": "Luiz Felipe",
+          "number": 3
+        },
+        {
+          "id": 19161780,
+          "name": "Juninho",
+          "number": 8
+        }
+      ],
+      "missing_players": []
+    }
+  },
+  "error": null
+}

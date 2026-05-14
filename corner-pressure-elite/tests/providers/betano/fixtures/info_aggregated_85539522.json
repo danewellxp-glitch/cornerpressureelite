@@ -1,0 +1,231 @@
+{
+  "meta": {
+    "version": "local"
+  },
+  "data": {
+    "match": {
+      "id": "3hd0vxt3dysvof6wqye0d4iz8",
+      "sportsbook_id": "85539522",
+      "home_team_id": "7tev5pifn8hdy4vlts0coha1b",
+      "home_team": "AA Argentinos Juniors",
+      "home_team_code": "ARG",
+      "home_team_color": "#204d7c",
+      "away_team_id": "3rw8ouixzsh3x8dgy8ifev925",
+      "away_team": "CA Huracán",
+      "away_team_code": "HUR",
+      "away_team_color": "#ffffff",
+      "coverage_level": "13",
+      "date": "2026-05-13T00:30:00.000Z",
+      "current_period": 2,
+      "league_name": "Liga Profesional Argentina",
+      "kaizen_match_name": "Argentinos Juniors vs CA Huracan",
+      "started": true,
+      "supports_pass_coordinates": true
+    },
+    "lineups": {
+      "home": {
+        "id": "108966",
+        "name": "Argentinos Juniors",
+        "name_short": "Argentinos Juniors",
+        "on_pitch": [
+          {
+            "id": "19185455",
+            "name": "Brayan Cortés"
+          },
+          {
+            "id": "19202895",
+            "name": "Sebastian Prieto"
+          },
+          {
+            "id": "19230264",
+            "name": "Roman Riquelme"
+          },
+          {
+            "id": "19198527",
+            "name": "F. Alvarez"
+          },
+          {
+            "id": "19198484",
+            "name": "Leandro Lozano"
+          },
+          {
+            "id": "19179631",
+            "name": "Nicolas Oroz"
+          },
+          {
+            "id": "19205007",
+            "name": "Federico Fattori"
+          },
+          {
+            "id": "19204985",
+            "name": "Alan Lescano"
+          },
+          {
+            "id": "19317786",
+            "name": "Facundo Jainikoski"
+          },
+          {
+            "id": "19198744",
+            "name": "Tomas Molina"
+          },
+          {
+            "id": "19174716",
+            "name": "Hernan Lopez"
+          }
+        ],
+        "substitutes": [
+          {
+            "id": "19163221",
+            "name": "Claudio Bravo"
+          },
+          {
+            "id": "19253058",
+            "name": "Kevin Coronel"
+          },
+          {
+            "id": "19169363",
+            "name": "Gabriel Florentin"
+          },
+          {
+            "id": "19174034",
+            "name": "Lautaro Giaccone"
+          },
+          {
+            "id": "18972707",
+            "name": "Erik Godoy"
+          },
+          {
+            "id": "19252921",
+            "name": "Lucas Gomez"
+          },
+          {
+            "id": "19317785",
+            "name": "Kida Ryoga"
+          },
+          {
+            "id": "18973727",
+            "name": "Ivan Morales"
+          },
+          {
+            "id": "19163644",
+            "name": "Franco Paredes"
+          },
+          {
+            "id": "1036900",
+            "name": "Enzo Perez"
+          },
+          {
+            "id": "19265574",
+            "name": "Diego Porcel"
+          },
+          {
+            "id": "19254897",
+            "name": "Gonzalo Siri"
+          }
+        ]
+      },
+      "away": {
+        "id": "108968",
+        "name": "CA Huracán",
+        "name_short": "CA Huracán",
+        "on_pitch": [
+          {
+            "id": "19172010",
+            "name": "Hernán Galíndez"
+          },
+          {
+            "id": "19175767",
+            "name": "Cesar Ibanez"
+          },
+          {
+            "id": "19205006",
+            "name": "Lucas Carrizo"
+          },
+          {
+            "id": "19162462",
+            "name": "Hugo Nervo"
+          },
+          {
+            "id": "19289077",
+            "name": "Ignacio Campo"
+          },
+          {
+            "id": "19160420",
+            "name": "Facundo Waller"
+          },
+          {
+            "id": "19174029",
+            "name": "Emmanuel Ojeda"
+          },
+          {
+            "id": "19318002",
+            "name": "Facundo Kalinger"
+          },
+          {
+            "id": "18939183",
+            "name": "Leonardo Gil"
+          },
+          {
+            "id": "19202890",
+            "name": "Lucas Blondel"
+          },
+          {
+            "id": "19172008",
+            "name": "Jordy Caicedo"
+          }
+        ],
+        "substitutes": [
+          {
+            "id": "19240522",
+            "name": "Juan Bisanz"
+          },
+          {
+            "id": "19193347",
+            "name": "Oscar Cortes"
+          },
+          {
+            "id": "19259000",
+            "name": "Luciano Gimenez"
+          },
+          {
+            "id": "19289076",
+            "name": "Leandro Lescano"
+          },
+          {
+            "id": "19174700",
+            "name": "Alejandro Martinez"
+          },
+          {
+            "id": "19174057",
+            "name": "Sebastian Meza"
+          },
+          {
+            "id": "19305022",
+            "name": "Lautaro Mora"
+          },
+          {
+            "id": "19318250",
+            "name": "Maximo Palazzo"
+          },
+          {
+            "id": "18946484",
+            "name": "Nehuén Paz"
+          },
+          {
+            "id": "19303219",
+            "name": "Thaiel Peralta"
+          },
+          {
+            "id": "1078354",
+            "name": "Óscar Romero"
+          },
+          {
+            "id": "19174243",
+            "name": "Federico Vera"
+          }
+        ]
+      }
+    }
+  },
+  "error": null
+}
