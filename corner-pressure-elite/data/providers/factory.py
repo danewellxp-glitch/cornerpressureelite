@@ -73,6 +73,8 @@ async def build_providers(
             client=bridge_client,
             fixture_repo=fixture_repo,
             min_score=min_score,
+            odd_min=float(getattr(settings, "BETANO_BRIDGE_PREFERRED_ODD_MIN", 1.50)),
+            odd_max=float(getattr(settings, "BETANO_BRIDGE_PREFERRED_ODD_MAX", 1.70)),
         )
 
         async def _bridge_shutdown() -> None:
