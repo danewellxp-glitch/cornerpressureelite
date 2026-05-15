@@ -180,6 +180,50 @@ async def test_cards_uses_composite_when_flag_on(monkeypatch):
     assert jogo.odds_source_cartoes == "betano_bridge"
 
 
+@pytest.mark.asyncio
+async def test_cards_uses_pre_avaliar_as_gate_for_odds_fetch(monkeypatch):
+    jogo = _jogo(linha_cartoes=0.0, odd_cartoes=0.0)
+    sistema = _make_sistema(monkeypatch, flag_on=True, jogo=jogo, cards_active=True)
+    sistema.cards_decision_engine.pre_avaliar.return_value = 6  # tension score, não-None
+    sistema.composite_odds.get_cards = AsyncMock(
+        return_value=_canonical("betano_bridge", market_kind="cards",
+                                linha=4.5, odd_over=1.60, odd_under=2.30)
+    )
+    # Captura o estado das odds no momento em que avaliar() é chamado:
+    # prova que avaliar roda DEPOIS das odds populadas.
+    linha_no_avaliar = {}
+
+    def _capture(j):
+        linha_no_avaliar["linha"] = j.linha_cartoes
+        linha_no_avaliar["odd"] = j.odd_cartoes
+        return None
+
+    sistema.cards_decision_engine.avaliar.side_effect = _capture
+
+    await sistema._analisar_jogo(_FIXTURE)
+
+    sistema.composite_odds.get_cards.assert_awaited_once()
+    assert jogo.linha_cartoes == 4.5
+    assert jogo.odd_cartoes == 1.60
+    assert jogo.odds_source_cartoes == "betano_bridge"
+    sistema.cards_decision_engine.avaliar.assert_called_once()
+    assert linha_no_avaliar == {"linha": 4.5, "odd": 1.60}
+
+
+@pytest.mark.asyncio
+async def test_cards_skips_odds_fetch_when_pre_avaliar_rejects(monkeypatch):
+    jogo = _jogo(linha_cartoes=0.0, odd_cartoes=0.0)
+    sistema = _make_sistema(monkeypatch, flag_on=True, jogo=jogo, cards_active=True)
+    sistema.cards_decision_engine.pre_avaliar.return_value = None  # bloqueado
+
+    await sistema._analisar_jogo(_FIXTURE)
+
+    sistema.composite_odds.get_cards.assert_not_awaited()
+    sistema.api_client.get_live_odds_cards.assert_not_awaited()
+    sistema.cards_decision_engine.avaliar.assert_not_called()
+    assert jogo.linha_cartoes == 0.0
+
+
 # ─── Formatters ─────────────────────────────────────────────────────
 
 def test_message_formatter_single_source_when_bridge():
