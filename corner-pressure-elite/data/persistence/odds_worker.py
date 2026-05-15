@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from data.repositories.odds_history import OddsHistoryEntry, OddsHistoryRepo
@@ -73,3 +74,46 @@ class OddsPersistenceWorker(_BaseBatchWorker[OddsHistoryEntry]):
             },
         )
         self.enqueue(entry)
+
+    # ---- catálogo completo (Fase D.0 — full coverage) ----
+
+    def enqueue_catalog(
+        self,
+        *,
+        fixture_id: int,
+        source: str,
+        market_kind: str,
+        catalog_lines: list[dict],
+        minute: Optional[int] = None,
+        score_home: Optional[int] = None,
+        score_away: Optional[int] = None,
+        pressure_score: Optional[float] = None,
+        tension_score: Optional[float] = None,
+    ) -> None:
+        """Enfileira N entries (uma por linha do catálogo) com contexto rico.
+
+        `catalog_lines`: lista vinda do bridge no formato
+          [{"line": 5.5, "over_price": 1.19, "under_price": 4.15, ...}, ...]
+
+        Todas as N linhas compartilham o mesmo `captured_at` — capturadas no
+        mesmo instante, viabiliza `GROUP BY captured_at` como "uma captura".
+        """
+        captured_at = datetime.now(timezone.utc)
+        for position, line_data in enumerate(catalog_lines):
+            entry = OddsHistoryEntry(
+                fixture_id=fixture_id,
+                source=source,
+                market_kind=market_kind,
+                market_code="",
+                linha=float(line_data["line"]),
+                odd_over=float(line_data["over_price"]),
+                odd_under=float(line_data["under_price"]),
+                minute=minute,
+                score_home=score_home,
+                score_away=score_away,
+                pressure_score=pressure_score,
+                tension_score=tension_score,
+                captured_at=captured_at,
+                raw={"catalog_position": position},
+            )
+            self.enqueue(entry)
