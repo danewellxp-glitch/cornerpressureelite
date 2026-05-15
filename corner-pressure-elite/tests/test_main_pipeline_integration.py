@@ -54,13 +54,21 @@ def _make_sistema(monkeypatch, *, flag_on: bool, jogo: JogoAoVivo,
     sistema.composite_odds = MagicMock()
     sistema.composite_odds.get_corners = AsyncMock(return_value=None)
     sistema.composite_odds.get_cards = AsyncMock(return_value=None)
+    # GOALS está dormente — Composite real não expõe get_goals. `del` faz
+    # o hasattr() em _capturar_odds_para_telemetria devolver False.
+    del sistema.composite_odds.get_goals
 
     sistema.decision_engine = MagicMock()
     sistema.decision_engine.pre_avaliar.return_value = 5
     sistema.decision_engine.avaliar.return_value = None
+    sistema.decision_engine.score_engine.calcular.return_value = 7
 
     sistema.cards_decision_engine = MagicMock()
     sistema.cards_decision_engine.avaliar.return_value = None
+    sistema.cards_decision_engine.score_engine.calcular.return_value = 4
+
+    # Telemetria de odds (Fase D.0): tracking de última captura por mercado.
+    sistema._last_capture_at = {}
 
     sistema.database = MagicMock()
     sistema.database.salvar_snapshot = AsyncMock()
@@ -86,6 +94,19 @@ def _canonical(source: str, market_kind: str = "corners", **over) -> CanonicalOv
     )
     base.update(over)
     return CanonicalOverUnder(**base)
+
+
+def _emission_awaits(mock) -> list:
+    """Filtra os awaits de EMISSÃO de sinal (sem persist_telemetry=True).
+
+    A telemetria full coverage (Fase D.0) também chama composite.get_corners/
+    get_cards, sempre com persist_telemetry=True. Os testes de roteamento de
+    odds só se importam com a chamada de emissão.
+    """
+    return [
+        c for c in mock.await_args_list
+        if c.kwargs.get("persist_telemetry") is not True
+    ]
 
 
 # ─── Roteamento de odds (corners) ───────────────────────────────────
@@ -119,7 +140,8 @@ async def test_pipeline_uses_composite_when_flag_on(monkeypatch):
 
     await sistema._analisar_jogo(_FIXTURE)
 
-    sistema.composite_odds.get_corners.assert_awaited_once()
+    # Uma chamada de EMISSÃO (a de telemetria também roda, mas é separada).
+    assert len(_emission_awaits(sistema.composite_odds.get_corners)) == 1
     sistema.api_client.get_live_odds_multi_bookmaker.assert_not_awaited()
     assert jogo.linha_atual == 9.5
     assert jogo.odd_atual == 1.85
@@ -173,7 +195,7 @@ async def test_cards_uses_composite_when_flag_on(monkeypatch):
 
     await sistema._analisar_jogo(_FIXTURE)
 
-    sistema.composite_odds.get_cards.assert_awaited_once()
+    assert len(_emission_awaits(sistema.composite_odds.get_cards)) == 1
     sistema.api_client.get_live_odds_cards.assert_not_awaited()
     assert jogo.linha_cartoes == 4.5
     assert jogo.odd_cartoes == 1.60
@@ -202,7 +224,7 @@ async def test_cards_uses_pre_avaliar_as_gate_for_odds_fetch(monkeypatch):
 
     await sistema._analisar_jogo(_FIXTURE)
 
-    sistema.composite_odds.get_cards.assert_awaited_once()
+    assert len(_emission_awaits(sistema.composite_odds.get_cards)) == 1
     assert jogo.linha_cartoes == 4.5
     assert jogo.odd_cartoes == 1.60
     assert jogo.odds_source_cartoes == "betano_bridge"
@@ -218,7 +240,9 @@ async def test_cards_skips_odds_fetch_when_pre_avaliar_rejects(monkeypatch):
 
     await sistema._analisar_jogo(_FIXTURE)
 
-    sistema.composite_odds.get_cards.assert_not_awaited()
+    # Emissão bloqueada pelo pre_avaliar: nenhuma chamada de EMISSÃO de odds.
+    # A telemetria (persist_telemetry=True) roda independente — desacoplada.
+    assert _emission_awaits(sistema.composite_odds.get_cards) == []
     sistema.api_client.get_live_odds_cards.assert_not_awaited()
     sistema.cards_decision_engine.avaliar.assert_not_called()
     assert jogo.linha_cartoes == 0.0
