@@ -972,73 +972,73 @@ class CornerPressureElite:
             # ========== ANALISE CARTOES AMARELOS ==========
             if ANALISE_CARTOES_ATIVA:
                 try:
-                    sinal_cartoes = self.cards_decision_engine.avaliar(jogo)
-
-                    if sinal_cartoes:
-                        # Buscar odds de cartoes (lazy: so se tiver sinal)
-                        if jogo.linha_cartoes <= 0 or jogo.odd_cartoes <= 0:
-                            if USE_BETANO_BRIDGE:
-                                canonical_fixture = self._build_canonical_fixture(jogo)
-                                score = (jogo.placar_casa or 0) + (jogo.placar_fora or 0)
-                                canonical_cards = await self.composite_odds.get_cards(
-                                    canonical_fixture, current_score=score, line=None,
-                                )
-                                if canonical_cards:
-                                    jogo.linha_cartoes = canonical_cards.linha
-                                    jogo.odd_cartoes = canonical_cards.odd_over
-                                    jogo.odds_source_cartoes = canonical_cards.source
-                                    # Re-evaluate with updated odds
-                                    sinal_cartoes = self.cards_decision_engine.avaliar(jogo)
-                                else:
-                                    logger.warning(
-                                        f"composite.get_cards retornou None para {desc} "
-                                        f"(fixture={fixture_id}) — segue sem odds de cartões"
-                                    )
-                            else:
-                                # PATH LEGACY — odds de cartões via APIFootball.
-                                try:
-                                    cards_odds = await self.api_client.get_live_odds_cards(fixture_id)
-                                    if cards_odds:
-                                        jogo.linha_cartoes = cards_odds.get("linha", jogo.linha_cartoes)
-                                        jogo.odd_cartoes = cards_odds.get("odd_over", jogo.odd_cartoes)
-                                        # Re-evaluate with updated odds
-                                        sinal_cartoes = self.cards_decision_engine.avaliar(jogo)
-                                except Exception as odds_err:
-                                    logger.debug(f"Erro ao buscar odds cartoes: {odds_err}")
-
-                    if sinal_cartoes:
-                        # Cartões só para plano max (ou admin)
-                        cards_users = [
-                            u for u in await self.database.list_users_for_broadcast()
-                            if u.get("plan") == "max" or u.get("role") == "admin"
-                        ]
-                        if not self.cards_state_manager.ja_alertou(fixture_id):
-                            # 1) Broadcast pro grupo cartões
-                            await self.notifier.send_cards_signal(sinal_cartoes)
-                            # 2) DM per-user (max ou admin)
-                            sent_count = 0
-                            for u in cards_users:
-                                ok = await self.notifier.send_cards_signal_to_user(
-                                    sinal_cartoes, u["id"], u["whatsapp"], market="cards",
-                                )
-                                if ok:
-                                    sent_count += 1
-                            logger.info(
-                                f"Sinal cartões entregue a {sent_count}/{len(cards_users)} users max + grupo: "
-                                f"{sinal_cartoes.jogo.descricao}"
+                    # Pre-avaliacao: filtros + tension score SEM buscar odds.
+                    # Espelha o path de escanteios — o gate antigo (avaliar)
+                    # exigia linha_cartoes > 0, populada SO apos as odds:
+                    # deadlock circular que rejeitava 100% dos sinais de cartoes.
+                    pre_cards_score = self.cards_decision_engine.pre_avaliar(jogo)
+                    if pre_cards_score is not None:
+                        if USE_BETANO_BRIDGE:
+                            canonical_fixture = self._build_canonical_fixture(jogo)
+                            score = (jogo.placar_casa or 0) + (jogo.placar_fora or 0)
+                            canonical_cards = await self.composite_odds.get_cards(
+                                canonical_fixture, current_score=score, line=None,
                             )
-                            self.notifier.commit_cards_signal(sinal_cartoes)
-                            await self.database.registrar_sinal_cartoes(sinal_cartoes)
-                            self.cards_state_manager.registrar_alerta(sinal_cartoes)
-
-                        elif self.cards_state_manager.deve_reavaliar(fixture_id, sinal_cartoes):
-                            self.cards_state_manager.atualizar_reavaliacao(sinal_cartoes)
-                            await self.notifier.send_cards_reevaluation(sinal_cartoes)
-                            for u in cards_users:
-                                await self.notifier.send_cards_reevaluation_to_user(
-                                    sinal_cartoes, u["id"], u["whatsapp"], market="cards",
+                            if canonical_cards:
+                                jogo.linha_cartoes = canonical_cards.linha
+                                jogo.odd_cartoes = canonical_cards.odd_over
+                                jogo.odds_source_cartoes = canonical_cards.source
+                            else:
+                                logger.warning(
+                                    f"composite.get_cards retornou None para {desc} "
+                                    f"(fixture={fixture_id}) — segue sem odds de cartões"
                                 )
-                            self.notifier.commit_cards_signal(sinal_cartoes)
+                        else:
+                            # PATH LEGACY — odds de cartões via APIFootball.
+                            try:
+                                cards_odds = await self.api_client.get_live_odds_cards(fixture_id)
+                                if cards_odds:
+                                    jogo.linha_cartoes = cards_odds.get("linha", jogo.linha_cartoes)
+                                    jogo.odd_cartoes = cards_odds.get("odd_over", jogo.odd_cartoes)
+                            except Exception as odds_err:
+                                logger.debug(f"Erro ao buscar odds cartoes: {odds_err}")
+
+                        # Avaliacao completa: agora com odds populadas.
+                        sinal_cartoes = self.cards_decision_engine.avaliar(jogo)
+
+                        if sinal_cartoes:
+                            # Cartões só para plano max (ou admin)
+                            cards_users = [
+                                u for u in await self.database.list_users_for_broadcast()
+                                if u.get("plan") == "max" or u.get("role") == "admin"
+                            ]
+                            if not self.cards_state_manager.ja_alertou(fixture_id):
+                                # 1) Broadcast pro grupo cartões
+                                await self.notifier.send_cards_signal(sinal_cartoes)
+                                # 2) DM per-user (max ou admin)
+                                sent_count = 0
+                                for u in cards_users:
+                                    ok = await self.notifier.send_cards_signal_to_user(
+                                        sinal_cartoes, u["id"], u["whatsapp"], market="cards",
+                                    )
+                                    if ok:
+                                        sent_count += 1
+                                logger.info(
+                                    f"Sinal cartões entregue a {sent_count}/{len(cards_users)} users max + grupo: "
+                                    f"{sinal_cartoes.jogo.descricao}"
+                                )
+                                self.notifier.commit_cards_signal(sinal_cartoes)
+                                await self.database.registrar_sinal_cartoes(sinal_cartoes)
+                                self.cards_state_manager.registrar_alerta(sinal_cartoes)
+
+                            elif self.cards_state_manager.deve_reavaliar(fixture_id, sinal_cartoes):
+                                self.cards_state_manager.atualizar_reavaliacao(sinal_cartoes)
+                                await self.notifier.send_cards_reevaluation(sinal_cartoes)
+                                for u in cards_users:
+                                    await self.notifier.send_cards_reevaluation_to_user(
+                                        sinal_cartoes, u["id"], u["whatsapp"], market="cards",
+                                    )
+                                self.notifier.commit_cards_signal(sinal_cartoes)
                 except Exception as cards_err:
                     logger.error(f"Erro na analise de cartoes para {desc}: {cards_err}")
 
