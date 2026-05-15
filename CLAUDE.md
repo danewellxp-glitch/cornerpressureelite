@@ -186,7 +186,8 @@ Toda documentação vive em `docs/`. **Nunca crie .md na raiz do projeto** (exce
 | Setup | `docs/setup/` | Deploy, WAHA, Cloudflare, ambiente |
 | Manuals | `docs/manuals/` | DEPLOYMENT.md, USER_GUIDE.md (público) |
 | API | `docs/api/` | Referência de endpoints |
-| Changelog | `docs/changelog/` | `YYYY-MM-DD-slug.md` (1 arquivo por entrega) |
+| Changelog narrativo | `docs/CHANGELOG.md` | 1 entrada por sessão (regra atual — ver §12) |
+| Changelog histórico | `docs/changelog/` | `YYYY-MM-DD-slug.md` (entregas anteriores a 2026-05-15) |
 | Credenciais | `docs/credenciais/` | **Não versionar.** Adicionar a `.gitignore`. |
 
 **Convenções:**
@@ -299,5 +300,50 @@ Para apontar um subdomínio novo para o tunnel: `cloudflared tunnel route dns ss
 
 1. Antes de mudar lógica de decisão, leia primeiro o documento mestre em `docs/architecture/visao-geral-do-sistema.md` (se existir) ou `docs/PRODUCT_MASTER_PLAN.md`.
 2. Antes de mexer em WAHA, leia `docs/changelog/2026-02-15-fix-waha-session-stopped.md` e `docs/architecture/waha-webhook-architecture.md`.
-3. Antes de criar arquivos de doc, releia §6 deste arquivo.
+3. Antes de criar arquivos de doc, releia §6 e §12 deste arquivo.
 4. Se for ação destrutiva (drop tabela, force push, reset DB), **pergunte ao usuário antes** mesmo que pareça óbvio.
+
+---
+
+## 12. Sistema de Documentação Ativa
+
+O projeto mantém documentação ativa em `docs/`. **TODA sessão deve manter esses arquivos atualizados** conforme regras abaixo.
+
+> **Nota sobre §6:** as regras desta seção §12 **superam** a linha "Changelog | docs/changelog/ | 1 arquivo por entrega" da tabela §6. Changelogs novos vão em `docs/CHANGELOG.md` (monolítico, narrativo, 1 entrada por sessão). A pasta `docs/changelog/` permanece como leitura histórica de entregas anteriores a 2026-05-15.
+
+### Arquivos meta-doc (raiz `docs/`)
+
+- `docs/DECISIONS.md` — Decisões arquiteturais (ADRs curtos: contexto, razão, trade-offs). Specs longas continuam em `docs/architecture/`.
+- `docs/BUGS.md` — Bugs encontrados (sintoma, causa, fix, lição).
+- `docs/CHANGELOG.md` — Resumo narrativo por sessão (substitui convenção antiga de `docs/changelog/YYYY-MM-DD-*.md`).
+- `docs/OPERATIONS.md` — Runbook quick-reference (subir, derrubar, recovery). Setup detalhado fica em `docs/setup/`; deploy completo em `docs/manuals/DEPLOYMENT.md`.
+- `docs/ROADMAP.md` — Fases planejadas + estado atual (1 linha por fase). Detalhes operacionais por sprint continuam em `docs/sprints/`.
+- `CLAUDE.md` (este) — Convenções, regras, topologia.
+
+### Regras de manutenção
+
+**Toda sessão DEVE:**
+1. **Ao começar:** Ler `CHANGELOG.md` (última entrada) + `ROADMAP.md` (estado atual) pra contexto rápido.
+2. **Quando encontrar bug:** Adicionar entrada em `BUGS.md` após fix (sintoma + causa + fix + lição).
+3. **Quando tomar decisão arquitetural:** Adicionar entrada em `DECISIONS.md` (contexto + razão + trade-offs).
+4. **Antes de fechar sessão:** Adicionar entrada em `CHANGELOG.md` resumindo o que foi feito.
+5. **Quando fase fechar ou nova for planejada:** Atualizar `ROADMAP.md`.
+6. **Quando descobrir procedure operacional:** Adicionar em `OPERATIONS.md` (recovery, deploy, validação).
+7. **Quando convenção/regra/topologia mudar:** Atualizar este `CLAUDE.md`.
+
+### Princípios
+
+- **Conciso > exaustivo.** Cada entrada deve ser lida em <60s.
+- **Narrativo > tabular.** Explica "porquê", não só "o quê".
+- **Atualizar conforme acontece.** Não acumular pra fim de semana.
+- **Linkar entre arquivos.** "Ver `BUGS.md#deadlock-cartoes`" em vez de duplicar.
+- **Commits separados.** Doc commit não mistura com code commit. Padrão: `docs(<arquivo>): <descrição>`.
+
+### Exemplo de commit de doc
+
+```
+docs(bugs): adicionar bug bridge bindando 127.0.0.1
+
+Fase 2bc smoke revelou que container Docker não alcançava bridge.
+Causa raiz, fix e lição registrados em docs/BUGS.md.
+```
