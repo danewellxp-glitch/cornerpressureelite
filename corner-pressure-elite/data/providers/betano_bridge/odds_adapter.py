@@ -12,6 +12,12 @@ Modos de operação (Fase 2a):
   preferida + degradação pra mais próxima do centro).
 - `line=X`     → consulta exatamente a linha X via `/quote` (Fase 3).
 
+Telemetria (Fase D.0):
+- Quando `persist_telemetry=True` e há `persistence_worker` injetado, o
+  caminho `line=None` enfileira o catálogo COMPLETO em `odds_history`
+  (todas as linhas, não só a central) com contexto rico (minuto, scores)
+  antes de escolher a linha central. Captura desacoplada da emissão.
+
 Convenções:
 - Captura toda exceção do client no boundary e devolve `None`
   (segue padrão de `APIFootballOddsProvider`).
@@ -46,6 +52,7 @@ class BetanoBridgeOddsAdapter:
         min_score: int = 0,
         odd_min: float = 1.50,
         odd_max: float = 1.70,
+        persistence_worker=None,
     ):
         self._client = client
         self._fixture_repo = fixture_repo
@@ -53,18 +60,37 @@ class BetanoBridgeOddsAdapter:
         self._odd_min = float(odd_min)
         self._odd_max = float(odd_max)
         self._event_id_cache: dict[int, str] = {}
+        self._persistence_worker = persistence_worker
 
     async def get_corners(
         self, fixture: CanonicalFixture, current_score: int,
         line: Optional[float] = None,
+        *,
+        minute: Optional[int] = None,
+        pressure_score: Optional[float] = None,
+        tension_score: Optional[float] = None,
+        persist_telemetry: bool = False,
     ) -> Optional[CanonicalOverUnder]:
-        return await self._get_market(fixture, current_score, line, "corners_over_under", "corners")
+        return await self._get_market(
+            fixture, current_score, line, "corners_over_under", "corners",
+            minute=minute, pressure_score=pressure_score,
+            tension_score=tension_score, persist_telemetry=persist_telemetry,
+        )
 
     async def get_cards(
         self, fixture: CanonicalFixture, current_score: int,
         line: Optional[float] = None,
+        *,
+        minute: Optional[int] = None,
+        pressure_score: Optional[float] = None,
+        tension_score: Optional[float] = None,
+        persist_telemetry: bool = False,
     ) -> Optional[CanonicalOverUnder]:
-        return await self._get_market(fixture, current_score, line, "cards_over_under", "cards")
+        return await self._get_market(
+            fixture, current_score, line, "cards_over_under", "cards",
+            minute=minute, pressure_score=pressure_score,
+            tension_score=tension_score, persist_telemetry=persist_telemetry,
+        )
 
     async def healthcheck(self) -> bool:
         try:
@@ -110,6 +136,11 @@ class BetanoBridgeOddsAdapter:
         line: Optional[float],
         bridge_market: str,
         market_kind: str,
+        *,
+        minute: Optional[int] = None,
+        pressure_score: Optional[float] = None,
+        tension_score: Optional[float] = None,
+        persist_telemetry: bool = False,
     ) -> Optional[CanonicalOverUnder]:
         if current_score < self._min_score:
             return None
@@ -129,7 +160,11 @@ class BetanoBridgeOddsAdapter:
             return None
 
         if line is None:
-            return await self._from_catalog(event_id, bridge_market, market_kind)
+            return await self._from_catalog(
+                event_id, bridge_market, market_kind,
+                fixture=fixture, minute=minute, pressure_score=pressure_score,
+                tension_score=tension_score, persist_telemetry=persist_telemetry,
+            )
         return await self._from_quote(event_id, line, bridge_market, market_kind)
 
     async def _from_quote(
@@ -197,9 +232,20 @@ class BetanoBridgeOddsAdapter:
         )
 
     async def _from_catalog(
-        self, event_id: str, bridge_market: str, market_kind: str
+        self, event_id: str, bridge_market: str, market_kind: str,
+        *,
+        fixture: Optional[CanonicalFixture] = None,
+        minute: Optional[int] = None,
+        pressure_score: Optional[float] = None,
+        tension_score: Optional[float] = None,
+        persist_telemetry: bool = False,
     ) -> Optional[CanonicalOverUnder]:
-        """Caminho line=None: consome /markets e escolhe linha central."""
+        """Caminho line=None: consome /markets e escolhe linha central.
+
+        Quando `persist_telemetry=True`, enfileira o catálogo COMPLETO em
+        `odds_history` antes de escolher a linha central — telemetria full
+        coverage desacoplada da emissão de sinal.
+        """
         t0 = time.perf_counter()
         try:
             catalog = await self._client.markets(event_id, bridge_market)
@@ -230,6 +276,29 @@ class BetanoBridgeOddsAdapter:
 
         elapsed = round(time.perf_counter() - t0, 2)
         lines = catalog.get("lines") or []
+
+        # Telemetria full coverage: persiste o catálogo inteiro antes de
+        # degradar pra linha central. Fire-and-forget — falha aqui não
+        # pode derrubar a resolução de odds.
+        if persist_telemetry and self._persistence_worker is not None and lines:
+            try:
+                self._persistence_worker.enqueue_catalog(
+                    fixture_id=fixture.fixture_id if fixture else 0,
+                    source=self.name,
+                    market_kind=market_kind,
+                    catalog_lines=lines,
+                    minute=minute,
+                    score_home=fixture.score_home if fixture else None,
+                    score_away=fixture.score_away if fixture else None,
+                    pressure_score=pressure_score,
+                    tension_score=tension_score,
+                )
+            except Exception:  # fronteira: telemetria não bloqueia odds
+                log.exception(
+                    "betano_bridge.enqueue_catalog.error event_id=%s market=%s",
+                    event_id, market_kind,
+                )
+
         chosen, in_range = self._pick_central_line(lines)
         if chosen is None:
             log.debug(

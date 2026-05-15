@@ -75,6 +75,7 @@ async def build_providers(
             min_score=min_score,
             odd_min=float(getattr(settings, "BETANO_BRIDGE_PREFERRED_ODD_MIN", 1.50)),
             odd_max=float(getattr(settings, "BETANO_BRIDGE_PREFERRED_ODD_MAX", 1.70)),
+            persistence_worker=odds_persistence_worker,
         )
 
         async def _bridge_shutdown() -> None:
