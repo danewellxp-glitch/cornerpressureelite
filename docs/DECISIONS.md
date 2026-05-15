@@ -67,6 +67,28 @@ Status: ativa / superada (linkando decisão que substituiu)
 
 ---
 
+## 2026-05-15 (sessão 3) — D.1 vai usar API HTTP nativa, não DOM scrape
+
+**Contexto:** Plano original da Fase D.1 (descoberta automática de eventos) era usar Playwright via bridge pra abrir listagens (`/live/`, `/sport/futebol/`) e parsear DOM/links. Investigação via mitmproxy (capturado no PC do daniel, não-flagueado) descobriu que a Betano expõe `/danae-webapi/api/live/overview/latest` — JSON estruturado com 301 eventos ao vivo, schemas completos de leagues/zones/sports, auth só via cookie `_cfuvid`.
+
+**Decisão:** D.1 implementa endpoints `/events/live` e `/events/today` no bridge fazendo requests HTTP diretas à Danae API, NÃO via Playwright/DOM scrape. Chrome continua aquecido apenas pra renovar cookies periodicamente (warmup loop). Ver [`docs/architecture/betano-danae-api.md`](architecture/betano-danae-api.md) pra mapeamento completo.
+
+**Alternativas consideradas:**
+- DOM scrape via Playwright (plano original) — abandonado: 8s/captura vs 150ms HTTP, frágil contra mudanças de UI, vulnerável a Splash Screen quando IP flagueado, captura limitada (sem context rico de league/zone)
+- SignalR WebSocket subscribe — adiado: requer SignalR Core client em Python, e polling 60s à API HTTP cobre o caso de descoberta. SignalR fica como otimização Phase H se latência virar gargalo
+
+**Trade-offs:**
+- ✅ Latência ~50× menor (150ms vs 8s)
+- ✅ Dados nativos (league_id, zone_id, betRadarId pra fuzzy match D.2)
+- ✅ Não compete com anti-bot da Betano (cliente HTTP normal com cookie válido)
+- ✅ Catálogos estáticos (`/api/static-content/assets/leagues|teams`) habilitam cache local
+- ❌ Endpoint não documentado — pode mudar (mitigado por monitorar `version`/`contentVersion` do response)
+- ❌ Dependência operacional do warmup Chrome (se cookie expira e Chrome cai, /events/* quebra)
+
+**Status:** ATIVA, implementação D.1 v2 pendente.
+
+---
+
 ## 2026-05-15 — Pool distribuído de Chromes (Fase Bridge Pool)
 
 **Contexto:** Único Chrome local na odin = ponto de falha. Sem redundância. Sem capacidade pra crescer.

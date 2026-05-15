@@ -38,3 +38,9 @@ Thumbs.db
 
 # Windows reserved names
 nul
+
+# Investigação Betano (capturas mitmproxy + HARs grandes — ficar no FS local)
+*.mitm
+mitmweb-*.log
+har_export_*.json
+betano-capture-*.json

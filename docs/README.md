@@ -45,6 +45,7 @@ Regras completas em [/CLAUDE.md §12](../CLAUDE.md).
 |---|---|
 | [architecture/full-spec-v2-waha.md](architecture/full-spec-v2-waha.md) | Especificação técnica original (WAHA + engine) |
 | [architecture/sistema-completo.md](architecture/sistema-completo.md) | **Referência canônica ponta-a-ponta** — call chains, schema, odds pipeline, plano Betano scraping (atualizado 2026-05-12) |
+| [architecture/betano-danae-api.md](architecture/betano-danae-api.md) | **Mapeamento da Danae Web API da Betano** — endpoints, schemas, auth, descoberto via mitmproxy 2026-05-15 |
 | [architecture/upcoming-games-polling.md](architecture/upcoming-games-polling.md) | Polling adaptativo |
 | [architecture/waha-webhook-architecture.md](architecture/waha-webhook-architecture.md) | Webhook PUSH do WAHA Plus |
 | [api/ENDPOINTS.md](api/ENDPOINTS.md) | Referência da API REST |

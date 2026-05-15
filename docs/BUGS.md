@@ -62,6 +62,26 @@ Commit: hash (se aplicável)
 
 ---
 
+## 2026-05-15 — IP residencial flagueado pela Cloudflare Bot Management
+
+**Sintoma:** Após investigação D.1 via Playwright, todas as URLs da Betano (incluindo páginas de jogo individuais que sempre funcionaram) começaram a retornar **"Betano Splash Screen"** com `body.innerText: 0 chars`. Mensagem visível: *"Access to this page is restricted due to security and compliance measures"*. Pool 2/2 ainda mostrava `healthy` (CDP responde), mas Chrome ambos endpoints recebiam Splash. Bridge `/markets` retornava `text_len=0, page_title="Betano Splash Screen"`.
+
+**Causa raiz:** Combinação de sinais que disparou Cloudflare Bot Management no IP residencial:
+1. **Burst** — ~30 navegações em 10min num IP que normalmente faz 0
+2. **URLs 404** — script `investigate_betano_v3.py` testou 10 URLs candidatas, 7 não existem (ex: `/inplay/`, `/sport/futebol/jogos-de-hoje/`). Bater 404s em sequência é assinatura clássica de scraper recon
+3. **Sem interação humana** — Playwright vai pra próxima URL sem mouse/scroll/focus events
+4. **Profile com mudança de padrão** — perfil tinha cookies de scraping de mercados, mudou pra navegação em listagens
+5. **Mesmo IP pra ambos endpoints** (odin localhost + danewell LAN) — flag foi no IP residencial, ambos caíram juntos
+
+**Fix:** Não há fix imediato. Cloudflare WAF block tem TTL ~12-24h, deve desbloquear sozinho. Estratégias defensivas pra próximas sessões em [DECISIONS.md](DECISIONS.md#2026-05-15-sessão-3--d1-vai-usar-api-http-nativa-não-dom-scrape):
+- D.1 vai usar API HTTP nativa (Danae) em vez de DOM scrape, eliminando bursts de page navigations
+- Polling baixo (60s+) e nunca testar URLs sem validação prévia
+- Mitmproxy do PC do daniel (não-flagueado) usado pra investigações futuras de schema
+
+**Lição:** Investigação técnica via Playwright em IP residencial **é caminho de mão única** — qualquer burst dispara flag global no IP. Pra exploração, preferir mitmproxy + navegador real do user, **nunca** scripts Playwright em sequência rápida no IP de produção. Se precisar Playwright pra investigar, usar VPN/proxy descartável (não o IP do bridge).
+
+---
+
 ## 2026-05-15 — Bridge sem auto-restart (reboot da odin)
 
 **Sintoma:** Odin reiniciou de madrugada. Containers Docker subiram automaticamente (auto-start). Bridge ficou DESLIGADO.

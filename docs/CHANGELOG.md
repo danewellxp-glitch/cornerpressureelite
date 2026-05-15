@@ -17,6 +17,40 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-15 (sessão 3) — D.1 investigação: descoberta da Danae API + IP flagueado
+
+**Contexto:** Investigação técnica da Fase D.1 (descoberta automática de eventos da Betano). Plano original: Playwright via bridge abrindo `/live/` e parseando DOM. Resultado: descoberta de API HTTP nativa muito superior, mas IP residencial flagueado no processo.
+
+**O que foi feito:**
+- Análise de 2 HARs exportados manualmente do navegador do daniel — descobertos endpoints `/api/home/top-events-v2/` e fragmentos
+- Tentativa de DOM scrape via Playwright na home da Betano — bloqueado por Splash Screen
+- Tentativa em URLs alternativas (futebol, ao-vivo, hoje) — todas retornaram Splash
+- Comparativo odin localhost vs danewell LAN — danewell funcionou inicialmente (298 jogos), depois também flagueado
+- Captura via mitmproxy no PC do daniel (não-flagueado) — 1134 flows, 22MB
+- Análise da captura: descoberto **`/danae-webapi/api/live/overview/latest`** — 913KB JSON com 301 eventos ao vivo, schema completo (events/leagues/zones/sports/markets/selections), auth via cookie `_cfuvid`
+- Descoberto também: `/api/home/upcoming-coupons` (eventos agendados por dia, com `betRadarId` por evento), `/danae-webapi/api/live/events/{id}/latest` (estado de evento individual), `/api/statsstream/{id}/info/aggregated/` (stats Opta-backed pra Phase E), catálogos estáticos de leagues/teams/regions
+- Documentação completa do schema em [`docs/architecture/betano-danae-api.md`](architecture/betano-danae-api.md)
+
+**Bugs encontrados:** [IP residencial flagueado pela Cloudflare Bot Management](BUGS.md#2026-05-15--ip-residencial-flagueado-pela-cloudflare-bot-management) — burst de ~30 navegações em 10min, 7 das quais 404. TTL ~12-24h, deve desbloquear sozinho.
+
+**Decisões:** [D.1 vai usar API HTTP nativa, não DOM scrape](DECISIONS.md#2026-05-15-sessão-3--d1-vai-usar-api-http-nativa-não-dom-scrape) — abandona Playwright/DOM em favor de requests HTTP diretas à Danae API. Chrome continua aquecido só pra renovar cookies (warmup loop).
+
+**Estado final:**
+- ✅ Schema completo da Danae API documentado
+- ✅ Captura mitm preservada pra futuras consultas (`betano-capture-20260515-152323.mitm`)
+- ✅ Decisão arquitetural D.1 v2 registrada
+- ❌ IP residencial flagueado — bridge `/markets` produzindo 0 captures até desbloqueio
+- ⏳ Implementação D.1 v2 pendente (próxima sessão)
+- ⏳ `/api/home/upcoming-coupons` mapeado mas não inspecionado a fundo (pra `/events/today`)
+
+**Próximos passos:**
+- Aguardar desbloqueio do IP (~12-24h)
+- Próxima sessão: implementar `/events/live` no bridge usando Danae API + warmup loop pra cookie
+- Validar contra polling de 60s sem disparar novo flag
+- Investigar `/api/home/upcoming-coupons` em profundidade pra `/events/today`
+
+---
+
 ## 2026-05-15 (sessão 2) — Systemd units pro bridge
 
 **Contexto:** Reboot acidental da odin de madrugada derrubou bridge + Chrome + Xvfb (rodavam via `nohup`, sem auto-restart). WAHA Docker sobreviveu (auto-restart Docker). danewell sobreviveu (já tinha systemd próprio). Recuperação manual levou ~30min. Resolver tornando o stack do bridge resilient a crash + reboot.
