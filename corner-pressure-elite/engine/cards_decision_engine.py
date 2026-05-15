@@ -96,10 +96,20 @@ class CardsDecisionEngine:
         Usar para decidir se vale buscar odds de cartoes."""
         motivo = self._verificar_filtros(jogo, self.strategy)
         if motivo:
+            logger.info(
+                f"[CARDS] ✗ Pre-avaliacao BLOQUEADO: {jogo.descricao} | {motivo}"
+            )
             return None
         score = self.score_engine.calcular(jogo, log=False)
         if score < self.strategy.min_score:
+            logger.info(
+                f"[CARDS] ✗ Pre-avaliacao Score insuficiente: {jogo.descricao} | "
+                f"Score={score} < {self.strategy.min_score}"
+            )
             return None
+        logger.info(
+            f"[CARDS] ✓ Pre-avaliacao APROVADA: {jogo.descricao} | Score={score}"
+        )
         return score
 
     def avaliar(self, jogo: JogoAoVivo) -> Optional[SinalCartoes]:
