@@ -14,6 +14,20 @@
 
 ---
 
+## 📋 Meta-docs ativos (ler todo início de sessão)
+
+| Doc | Quando ler | Quando atualizar |
+|---|---|---|
+| [CHANGELOG.md](CHANGELOG.md) | Início de sessão (última entrada) | Antes de fechar sessão |
+| [ROADMAP.md](ROADMAP.md) | Início de sessão (estado atual) | Quando fase fecha ou nova é planejada |
+| [DECISIONS.md](DECISIONS.md) | Quando questionar uma escolha arquitetural | Após decisão arquitetural significativa |
+| [BUGS.md](BUGS.md) | Quando bug parecido aparecer | Após corrigir bug |
+| [OPERATIONS.md](OPERATIONS.md) | Quando algo quebra (recovery, deploy) | Quando descobrir nova procedure |
+
+Regras completas em [/CLAUDE.md §12](../CLAUDE.md).
+
+---
+
 ## 🚀 Começando
 
 | Doc | Descrição |
@@ -79,6 +93,11 @@
 
 | Data | Mudança |
 |---|---|
+| [2026-05-13-fase-d-persistencia-completa.md](changelog/2026-05-13-fase-d-persistencia-completa.md) | Pivot Betano: Fase D completa — 3 repositories, 3 workers async (odds/incidents/cleanup), hooks no Composite e WS, healthcheck + queries SQL + 16 tests verdes |
+| [2026-05-13-fase-c-pipeline-refactor.md](changelog/2026-05-13-fase-c-pipeline-refactor.md) | Pivot Betano: Fase C — `Composite{Odds,Stats}Provider`, adapters AF+Betano, factory feature-flagged, drift logger + 20 tests verdes (`main.py` adiado) |
+| [2026-05-13-fase-b-betano-markets-ws.md](changelog/2026-05-13-fase-b-betano-markets-ws.md) | Pivot Betano: Fase B — `BetanoMarkets` (CNOU/TCOU), `BetanoCatalog` com fuzzy match, `BetanoWSClient` (SignalR Core), warmup Playwright + 21 unit tests verdes |
+| [2026-05-13-fase-a-betano-statsstream.md](changelog/2026-05-13-fase-a-betano-statsstream.md) | Pivot Betano: Fase A — `BetanoStatsStream` (7 endpoints Opta-backed), schemas tipados, parsers + 16 unit tests verdes, 17 fixtures extraídas do `.mitm` |
+| [2026-05-13-fase-d-migrations.md](changelog/2026-05-13-fase-d-migrations.md) | Pivot Betano: aplicadas as 3 migrations da Fase D (`betano_fixture_map`, `odds_history`, `incidents_history`) + loader idempotente em `Database.init()` |
 | [2026-05-11-migracao-dominio-iqpressure.md](changelog/2026-05-11-migracao-dominio-iqpressure.md) | Migração de domínio público: `odontoschultz.online` → `iqpressure.online` (apex agora serve dashboard; WAHA em `wa.`) |
 | [2026-05-11-fluxo-compra-pre-golive.md](changelog/2026-05-11-fluxo-compra-pre-golive.md) | Fluxo de compra: refund, dedup de webhooks, checkout idempotente, UX pós-verify |
 | [2026-05-10-adapter-permission-policy-claude-local.md](changelog/2026-05-10-adapter-permission-policy-claude-local.md) | Política de permissão migrou do adapter para o harness (PREA-22/23) |
