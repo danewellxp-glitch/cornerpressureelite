@@ -111,7 +111,7 @@ PRE_GAME_ALERT_MINUTES = int(os.getenv("PRE_GAME_ALERT_MINUTES", "30"))
 # ============================================================
 # ANALISE DE CARTOES AMARELOS (Over Cards)
 # ============================================================
-ANALISE_CARTOES_ATIVA = os.getenv("ANALISE_CARTOES_ATIVA", "false").lower() == "true"
+ANALISE_CARTOES_ATIVA = os.getenv("ANALISE_CARTOES_ATIVA", "true").lower() == "true"
 
 # Grupo WhatsApp separado para cartoes
 WHATSAPP_GROUP_CARTOES = os.getenv("WHATSAPP_GROUP_CARTOES", "")
