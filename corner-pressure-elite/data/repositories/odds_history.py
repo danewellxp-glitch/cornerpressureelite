@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 log = logging.getLogger("cpes.repo.odds_history")
@@ -24,6 +25,9 @@ class OddsHistoryEntry:
     pressure_score: Optional[float] = None
     tension_score: Optional[float] = None
     provider_pressure: Optional[float] = None
+    # None -> banco usa DEFAULT NOW(). enqueue_catalog seta um valor único
+    # pras N linhas de uma captura compartilharem timestamp idêntico.
+    captured_at: Optional[datetime] = None
     raw: Optional[dict] = None
 
 
@@ -40,6 +44,7 @@ class OddsHistoryRepo:
                 e.linha, e.odd_over, e.odd_under,
                 e.minute, e.score_home, e.score_away,
                 e.pressure_score, e.tension_score, e.provider_pressure,
+                e.captured_at,
                 json.dumps(e.raw or {}, ensure_ascii=False),
             )
             for e in entries
@@ -51,8 +56,10 @@ class OddsHistoryRepo:
                   (fixture_id, source, market_kind, market_code,
                    linha, odd_over, odd_under,
                    minute, score_home, score_away,
-                   pressure_score, tension_score, provider_pressure, raw)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb)
+                   pressure_score, tension_score, provider_pressure,
+                   captured_at, raw)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
+                        COALESCE($14, NOW()), $15::jsonb)
                 """,
                 rows,
             )
