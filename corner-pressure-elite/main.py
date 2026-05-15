@@ -62,6 +62,8 @@ from utils.helpers import parse_fixture_to_jogo, enrich_jogo_with_cards
 from data.odds_provider import CanonicalFixture
 from data.providers.factory import build_providers
 from data.repositories.fixture_map import FixtureMapRepo
+from data.repositories.odds_history import OddsHistoryRepo
+from data.persistence.odds_worker import OddsPersistenceWorker
 
 logger = logging.getLogger("CPES.Main")
 
@@ -108,6 +110,11 @@ class CornerPressureElite:
         # async). None enquanto USE_BETANO_BRIDGE=false ou antes do startup.
         self.composite_odds = None
         self._providers_shutdown = None
+        # Worker de telemetria de odds (Fase D.0) — instanciado em iniciar()
+        # só quando USE_BETANO_BRIDGE=true.
+        self.odds_persistence_worker: Optional[OddsPersistenceWorker] = None
+        # Última captura de telemetria por (fixture_id, market) -> timestamp ms.
+        self._last_capture_at: Dict[tuple, int] = {}
         self._running = False
         self._cycles = 0
         self._pending_signals_remaining = 0
@@ -166,13 +173,22 @@ class CornerPressureElite:
             logger.info(
                 f"BETANO_EVENT_MAP: {seeded} fixture(s) seedados em betano_fixture_map"
             )
+            # Telemetria de odds (Fase D.0): worker batcha inserts em
+            # odds_history. Iniciado ANTES de build_providers — o adapter
+            # Betano recebe a referência via factory.
+            self.odds_persistence_worker = OddsPersistenceWorker(
+                OddsHistoryRepo(self.database.pool)
+            )
+            await self.odds_persistence_worker.start()
+            logger.info("OddsPersistenceWorker iniciado — telemetria de odds ATIVA")
+
             fixture_repo = FixtureMapRepo(self.database.pool)
             self.composite_odds, _composite_stats, self._providers_shutdown = (
                 await build_providers(
                     settings=config,
                     api_client=self.api_client,
                     fixture_repo=fixture_repo,
-                    odds_persistence_worker=None,
+                    odds_persistence_worker=self.odds_persistence_worker,
                 )
             )
             logger.info("CompositeOddsProvider ativo (bridge Betano primário)")
@@ -817,6 +833,77 @@ class CornerPressureElite:
             score_away=jogo.placar_fora,
         )
 
+    def _should_capture(self, fixture_id: int, market: str, interval_sec: int) -> bool:
+        """True se já passou `interval_sec` desde a última captura do mercado."""
+        last_ms = self._last_capture_at.get((fixture_id, market), 0)
+        now_ms = int(time.time() * 1000)
+        return (now_ms - last_ms) >= (interval_sec * 1000)
+
+    def _mark_captured(self, fixture_id: int, market: str) -> None:
+        self._last_capture_at[(fixture_id, market)] = int(time.time() * 1000)
+
+    async def _capturar_odds_para_telemetria(self, jogo) -> None:
+        """Captura odds pra telemetria, desacoplada da emissão de sinal.
+
+        Política (Fase D.0):
+          - Só roda com USE_BETANO_BRIDGE (caminho legado não tem telemetria).
+          - Janela técnica por mercado (minuto >= X) — antes do kickoff e
+            depois do fim do jogo não chega aqui.
+          - Ciclo próprio por mercado, independente do ciclo do _main_loop.
+          - Persiste catálogo completo + contexto rico via persist_telemetry=True.
+        """
+        if not USE_BETANO_BRIDGE:
+            return
+        if jogo.minuto is None or jogo.minuto <= 0:
+            return
+
+        canonical_fixture = self._build_canonical_fixture(jogo)
+        score = (jogo.placar_casa or 0) + (jogo.placar_fora or 0)
+        # Scores calculados sem log — só pra enriquecer a telemetria.
+        pressure_score = self.decision_engine.score_engine.calcular(jogo, log=False)
+        tension_score = self.cards_decision_engine.score_engine.calcular(jogo, log=False)
+
+        if (
+            jogo.minuto >= config.ODDS_CAPTURE_MIN_MINUTE_CORNERS
+            and self._should_capture(
+                jogo.id, "corners", config.ODDS_CAPTURE_CYCLE_CORNERS_SEC
+            )
+        ):
+            await self.composite_odds.get_corners(
+                canonical_fixture, current_score=score, line=None,
+                minute=jogo.minuto, pressure_score=pressure_score,
+                tension_score=tension_score, persist_telemetry=True,
+            )
+            self._mark_captured(jogo.id, "corners")
+
+        if (
+            jogo.minuto >= config.ODDS_CAPTURE_MIN_MINUTE_CARDS
+            and self._should_capture(
+                jogo.id, "cards", config.ODDS_CAPTURE_CYCLE_CARDS_SEC
+            )
+        ):
+            await self.composite_odds.get_cards(
+                canonical_fixture, current_score=score, line=None,
+                minute=jogo.minuto, pressure_score=pressure_score,
+                tension_score=tension_score, persist_telemetry=True,
+            )
+            self._mark_captured(jogo.id, "cards")
+
+        # GOALS dormante: Composite ainda não expõe get_goals (fase futura).
+        if (
+            jogo.minuto >= config.ODDS_CAPTURE_MIN_MINUTE_GOALS
+            and self._should_capture(
+                jogo.id, "goals", config.ODDS_CAPTURE_CYCLE_GOALS_SEC
+            )
+            and hasattr(self.composite_odds, "get_goals")
+        ):
+            await self.composite_odds.get_goals(
+                canonical_fixture, current_score=score, line=None,
+                minute=jogo.minuto, pressure_score=pressure_score,
+                tension_score=tension_score, persist_telemetry=True,
+            )
+            self._mark_captured(jogo.id, "goals")
+
     async def _analisar_jogo(self, fixture: Dict):
         """Analisa um jogo individual (escanteios + cartoes). Retorna jogo se sucesso, None senao."""
         fixture_info = fixture.get("fixture", {})
@@ -845,6 +932,15 @@ class CornerPressureElite:
                 f"Cartoes: {jogo.cartoes_amarelos_total} | "
                 f"Placar: {jogo.placar}"
             )
+
+            # Telemetria full coverage — captura desacoplada de pre_avaliar.
+            # Fire-and-forget: falha aqui não bloqueia o pipeline de sinal.
+            try:
+                await self._capturar_odds_para_telemetria(jogo)
+            except Exception as e:
+                logger.warning(
+                    f"Telemetria de odds falhou para {fixture_id}: {e}"
+                )
 
             # ========== ANALISE ESCANTEIOS ==========
             # Pre-avaliacao: filtros + score SEM buscar odds (economia de 1-2 reqs)
@@ -1464,6 +1560,9 @@ class CornerPressureElite:
         await self.api_client.close()
         if self._providers_shutdown is not None:
             await self._providers_shutdown()
+        if self.odds_persistence_worker is not None:
+            await self.odds_persistence_worker.stop()
+            logger.info("OddsPersistenceWorker parado")
 
         stats = await self.database.get_estatisticas()
         logger.info(

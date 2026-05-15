@@ -260,3 +260,22 @@ def _parse_betano_event_map(raw: str) -> dict:
 
 # Seed manual fixture_id -> betano_event_id (temporário, ver Fase D).
 BETANO_EVENT_MAP = _parse_betano_event_map(os.getenv("BETANO_EVENT_MAP", ""))
+
+
+# ============================================================
+# Telemetria de odds (Fase D.0 — full coverage)
+# ============================================================
+# Captura desacoplada da emissão de sinal: _capturar_odds_para_telemetria
+# em main.py persiste o catálogo completo em odds_history. Só roda com
+# USE_BETANO_BRIDGE=true. Ciclos diferenciados por mercado pra caber no
+# limite de ~6 req/min de 1 Chrome. GOALS está dormente (sem get_goals
+# no Composite ainda) — config existe pra fase futura.
+# Ciclos de captura por mercado (segundos entre capturas do mesmo jogo).
+ODDS_CAPTURE_CYCLE_CORNERS_SEC = int(os.getenv("ODDS_CAPTURE_CYCLE_CORNERS_SEC", "90"))
+ODDS_CAPTURE_CYCLE_CARDS_SEC = int(os.getenv("ODDS_CAPTURE_CYCLE_CARDS_SEC", "240"))
+ODDS_CAPTURE_CYCLE_GOALS_SEC = int(os.getenv("ODDS_CAPTURE_CYCLE_GOALS_SEC", "360"))
+# Janela técnica mínima por mercado (minuto do jogo). Antes disso não há
+# stats live suficientes; após o fim o jogo sai de live e nem entra aqui.
+ODDS_CAPTURE_MIN_MINUTE_CORNERS = int(os.getenv("ODDS_CAPTURE_MIN_MINUTE_CORNERS", "15"))
+ODDS_CAPTURE_MIN_MINUTE_CARDS = int(os.getenv("ODDS_CAPTURE_MIN_MINUTE_CARDS", "10"))
+ODDS_CAPTURE_MIN_MINUTE_GOALS = int(os.getenv("ODDS_CAPTURE_MIN_MINUTE_GOALS", "5"))
