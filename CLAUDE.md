@@ -302,6 +302,7 @@ Para apontar um subdomínio novo para o tunnel: `cloudflared tunnel route dns ss
 2. Antes de mexer em WAHA, leia `docs/changelog/2026-02-15-fix-waha-session-stopped.md` e `docs/architecture/waha-webhook-architecture.md`.
 3. Antes de criar arquivos de doc, releia §6 e §12 deste arquivo.
 4. Se for ação destrutiva (drop tabela, force push, reset DB), **pergunte ao usuário antes** mesmo que pareça óbvio.
+5. **Antes de testar URL/endpoint/schema da Betano (ou qualquer alvo Cloudflare) via Playwright/bridge sem certeza** — peça ao usuário pra rodar mitmproxy no PC dele e capturar. Cada URL especulativa via Playwright conta como sinal de bot e pode flagar o IP residencial (downtime 12-24h). Detalhes e template de mensagem em `docs/architecture/playwright-anti-bot-checklist.md` §3 "Regra de incerteza".
 
 ---
 

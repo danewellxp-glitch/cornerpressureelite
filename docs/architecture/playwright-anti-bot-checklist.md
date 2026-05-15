@@ -211,6 +211,29 @@ Antes de iniciar qualquer sessão de investigação/exploração, escolher a fer
 | **Polling periódico de API descoberta** | `httpx` direto, Chrome só pra cookies | Mais leve, menos exposto |
 | **Smoke test ad-hoc em produção** | NÃO FAZER | Sempre via mitmproxy primeiro |
 
+### Regra de incerteza — peça mitmproxy ao usuário
+
+**Se o agente não tem certeza de uma URL, schema, header ou fluxo — NÃO testar via Playwright pra "ver o que retorna".** Cada teste especulativo conta como sinal de bot (especialmente URLs 404). Em vez disso, **pedir ao usuário pra rodar mitmproxy no PC dele** e capturar o tráfego natural.
+
+Casos típicos onde aplica:
+- "Acho que existe `/api/<algo>/today/` mas não tenho certeza" → pedir mitmproxy
+- "Não sei qual cookie é necessário pra autenticar" → pedir mitmproxy
+- "Preciso ver o response de X mas nunca capturei" → pedir mitmproxy
+- "Quero validar se o endpoint mudou de schema" → pedir mitmproxy
+- "Não sei a URL exata da página de Y" → pedir usuário navegar com mitmproxy
+
+Como pedir (template de mensagem):
+
+```
+Não tenho certeza de [URL/schema/header/fluxo] e testar via Playwright
+no bridge pode disparar flag (custaria 12-24h de downtime). Você pode
+rodar mitmproxy no seu PC, navegar [PASSO ESPECÍFICO], salvar .mitm e
+me mandar? Setup completo em [link/comando]. Demora ~5min e elimina
+a incerteza sem risco.
+```
+
+Critério prático: se a investigação envolve mais de **2 URLs novas** OU qualquer URL que não foi vista em capture anterior, **pedir mitmproxy é o default**. Playwright só pra reproduzir o que mitmproxy já validou.
+
 ---
 
 ## 4. Checklist pré-sessão de scraping
