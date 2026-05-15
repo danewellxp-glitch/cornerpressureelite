@@ -86,14 +86,32 @@ class CompositeOddsProvider:
     async def get_corners(
         self, fixture: CanonicalFixture, current_score: int,
         line: Optional[float] = None,
+        *,
+        minute: Optional[int] = None,
+        pressure_score: Optional[float] = None,
+        tension_score: Optional[float] = None,
+        persist_telemetry: bool = False,
     ) -> Optional[CanonicalOverUnder]:
-        return await self._dispatch("get_corners", fixture, current_score, line, "corners")
+        return await self._dispatch(
+            "get_corners", fixture, current_score, line, "corners",
+            minute=minute, pressure_score=pressure_score,
+            tension_score=tension_score, persist_telemetry=persist_telemetry,
+        )
 
     async def get_cards(
         self, fixture: CanonicalFixture, current_score: int,
         line: Optional[float] = None,
+        *,
+        minute: Optional[int] = None,
+        pressure_score: Optional[float] = None,
+        tension_score: Optional[float] = None,
+        persist_telemetry: bool = False,
     ) -> Optional[CanonicalOverUnder]:
-        return await self._dispatch("get_cards", fixture, current_score, line, "cards")
+        return await self._dispatch(
+            "get_cards", fixture, current_score, line, "cards",
+            minute=minute, pressure_score=pressure_score,
+            tension_score=tension_score, persist_telemetry=persist_telemetry,
+        )
 
     async def healthcheck(self) -> bool:
         for p in self._providers:
@@ -107,11 +125,26 @@ class CompositeOddsProvider:
     async def _dispatch(
         self, method: str, fixture: CanonicalFixture, score: int,
         line: Optional[float], market_kind: str,
+        *,
+        minute: Optional[int] = None,
+        pressure_score: Optional[float] = None,
+        tension_score: Optional[float] = None,
+        persist_telemetry: bool = False,
     ) -> Optional[CanonicalOverUnder]:
+        # Contexto rico + persistência de catálogo só fazem sentido pro
+        # bridge (único provider com /markets). APIFootball é intocado:
+        # recebe a assinatura legada (fixture, score, line).
+        bridge_ctx = {
+            "minute": minute,
+            "pressure_score": pressure_score,
+            "tension_score": tension_score,
+            "persist_telemetry": persist_telemetry,
+        }
         results: list[tuple[str, Optional[CanonicalOverUnder]]] = []
         for p in self._providers:
+            ctx = bridge_ctx if p.name == "betano_bridge" else {}
             try:
-                r = await getattr(p, method)(fixture, score, line)
+                r = await getattr(p, method)(fixture, score, line, **ctx)
             except Exception as e:  # fronteira: provider externo
                 log.warning(
                     "composite.%s.%s.error fixture=%d line=%s err=%s",
@@ -131,7 +164,14 @@ class CompositeOddsProvider:
             except Exception:
                 log.exception("composite.drift_log.error")
 
-        if primary is not None and self._persistence is not None:
+        # O bridge persiste o catálogo completo por conta própria
+        # (enqueue_catalog em _from_catalog). enqueue_from_dispatch só
+        # cobre o caso de o primary ser APIFootball (sem /markets).
+        if (
+            primary is not None
+            and self._persistence is not None
+            and primary.source != "betano_bridge"
+        ):
             try:
                 self._persistence.enqueue_from_dispatch(
                     fixture=fixture,
