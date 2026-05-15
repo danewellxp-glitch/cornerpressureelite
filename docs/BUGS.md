@@ -80,6 +80,8 @@ Commit: hash (se aplicável)
 
 **Lição:** Investigação técnica via Playwright em IP residencial **é caminho de mão única** — qualquer burst dispara flag global no IP. Pra exploração, preferir mitmproxy + navegador real do user, **nunca** scripts Playwright em sequência rápida no IP de produção. Se precisar Playwright pra investigar, usar VPN/proxy descartável (não o IP do bridge).
 
+Checklist defensivo consolidado em [`docs/architecture/playwright-anti-bot-checklist.md`](architecture/playwright-anti-bot-checklist.md) — ler antes de qualquer sessão futura de scraping.
+
 ---
 
 ## 2026-05-15 — Bridge sem auto-restart (reboot da odin)

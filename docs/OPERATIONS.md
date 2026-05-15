@@ -113,6 +113,20 @@ sleep 8
 docker logs -f cpes-main 2>&1 | grep -iE "telemetria|composite|enqueue|sinal"
 ```
 
+## Investigação técnica de scraping (regras)
+
+Antes de qualquer sessão de exploração / scraping novo apontando pra Betano (ou outro alvo Cloudflare), seguir [`architecture/playwright-anti-bot-checklist.md`](architecture/playwright-anti-bot-checklist.md). Em resumo:
+
+- **Mapear endpoint novo / schema desconhecido** → mitmproxy no PC humano, NÃO Playwright
+- **Validar URL** → navegador humano, NÃO `goto()` em loop
+- **Extrair de URL conhecida** → Playwright via bridge **com throttling ≥30s + jitter**
+- **Polling de API descoberta** → `httpx` direto, Chrome só pra renovar cookies
+- **Smoke test ad-hoc em produção** → ❌ proibido sem mitmproxy primeiro
+
+Detecção em runtime: se `page.title()` contiver "Splash Screen" ou body mencionar "restricted/compliance", **parar imediatamente** — cada retry adicional reforça o flag (TTL 12-24h).
+
+Recovery se IP flagueado: aguardar 12-24h. Se persistir, trocar IP (modem off 1h) e recriar profile. Detalhes em [`BUGS.md`](BUGS.md#2026-05-15--ip-residencial-flagueado-pela-cloudflare-bot-management).
+
 ## Recovery após reboot acidental
 
 Com systemd ativo (após 2026-05-15), o stack do bridge sobe sozinho no boot. Validar:
