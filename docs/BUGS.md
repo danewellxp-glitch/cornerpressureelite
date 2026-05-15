@@ -68,6 +68,6 @@ Commit: hash (se aplicável)
 
 **Causa raiz:** Bridge rodava via `nohup python server.py & disown`. Sem systemd unit. Quando shell de sessão SSH fechou no reboot, processo morreu sem auto-restart.
 
-**Fix:** [pendente] systemd units pra Xvfb :100 + Chrome local + bridge.
+**Fix:** 3 systemd user units encadeadas (`xvfb-bridge.service` → `chrome-bridge.service` → `cpes-bridge.service`) com `Restart=always` e `Requires/After`. `loginctl enable-linger daniel` pra services sobreviverem a logoff e subirem no boot. Units versionadas em `~/cpes-bridge/systemd/`. Cenário A (kill bridge → auto-restart em <14s) validado; Cenário B (reboot real) pendente. Ver `OPERATIONS.md` seção "Stack systemd".
 
-**Lição:** Toda dependência crítica precisa ser systemd-managed. `nohup` é gambiarra pra dev, não pra produção. Adicionar systemd units assim que serviço se prova útil.
+**Lição:** Toda dependência crítica precisa ser systemd-managed. `nohup` é gambiarra pra dev, não pra produção. **Detalhe importante:** `Restart=on-failure` NÃO restarta em SIGTERM (kill manual considerado "graceful"). Pra resiliência real contra kill externo, usar `Restart=always`.

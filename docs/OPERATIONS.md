@@ -4,11 +4,38 @@ Comandos pra subir, derrubar, validar, fazer recovery. **Quando algo quebra às 
 
 > **Escopo:** quick-reference operacional. Setup detalhado de ambiente vai em `docs/setup/`. Deploy completo vai em `docs/manuals/DEPLOYMENT.md`.
 
-## Subir bridge do zero
+## Stack systemd (uso normal)
+
+3 user units encadeadas via `Requires/After`. `loginctl enable-linger daniel` já habilitado. Sobem no boot automaticamente. Units versionadas em `~/cpes-bridge/systemd/`.
 
 ```bash
-# 1. Xvfb :100 (se já vivo, pula)
-if ! pgrep -f "Xvfb.*:100" > /dev/null; then
+# Subir tudo (chain Requires sobe xvfb → chrome → bridge)
+systemctl --user start cpes-bridge.service
+
+# Status
+systemctl --user status xvfb-bridge chrome-bridge cpes-bridge --no-pager
+
+# Restart limpo
+systemctl --user restart cpes-bridge.service
+
+# Parar tudo
+systemctl --user stop cpes-bridge.service chrome-bridge.service xvfb-bridge.service
+
+# Logs em tempo real
+journalctl --user -u cpes-bridge.service -f
+tail -f ~/cpes-bridge/bridge.log
+tail -f ~/cpes-bridge/chrome-systemd.log
+```
+
+`Restart=always` em todas — qualquer crash ou kill externo restarta em ≤15s.
+
+## Subir bridge manualmente (fallback de emergência)
+
+Usar só se systemd estiver indisponível ou pra debug interativo:
+
+```bash
+# 1. Xvfb :100
+if ! pgrep -u daniel -f "Xvfb.*:100" > /dev/null; then
     nohup Xvfb :100 -screen 0 1920x1080x24 > /tmp/xvfb-100.log 2>&1 &
     disown
     sleep 2
@@ -88,10 +115,12 @@ docker logs -f cpes-main 2>&1 | grep -iE "telemetria|composite|enqueue|sinal"
 
 ## Recovery após reboot acidental
 
-1. Verifica estado:
-   `ps aux | grep -E "Xvfb|chrome.*9223|server.py" | grep -v grep`
-2. Se algo faltando, segue "Subir bridge do zero" acima.
-3. Verifica WAHA não foi afetado:
-   `docker ps | grep waha`
-4. Container CPES auto-restartou:
-   `docker ps | grep cpes-main`
+Com systemd ativo (após 2026-05-15), o stack do bridge sobe sozinho no boot. Validar:
+
+1. **Pool**: `curl -s http://localhost:8080/pool/status | python3 -m json.tool` — esperar 2/2 healthy.
+2. **Status systemd**: `systemctl --user is-active xvfb-bridge chrome-bridge cpes-bridge` — esperar 3× active.
+3. **WAHA intacto**: `docker ps | grep waha` (auto-restart Docker).
+4. **CPES container**: `docker ps | grep cpes-main` (auto-restart Docker).
+5. Se algum service falhou: `journalctl --user -u <service> -n 50 --no-pager` pra diagnosticar.
+
+Se systemd não subiu (extremamente raro): seguir "Subir bridge manualmente (fallback de emergência)" acima.

@@ -17,6 +17,38 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-15 (sessão 2) — Systemd units pro bridge
+
+**Contexto:** Reboot acidental da odin de madrugada derrubou bridge + Chrome + Xvfb (rodavam via `nohup`, sem auto-restart). WAHA Docker sobreviveu (auto-restart Docker). danewell sobreviveu (já tinha systemd próprio). Recuperação manual levou ~30min. Resolver tornando o stack do bridge resilient a crash + reboot.
+
+**O que foi feito:**
+- 3 user units encadeadas: `xvfb-bridge.service` → `chrome-bridge.service` → `cpes-bridge.service` (Requires/After)
+- `loginctl enable-linger daniel` pra services subirem sem login
+- `Restart=always` em todas (descoberto que `on-failure` não dispara em SIGTERM)
+- `ExecStartPre` no chrome-bridge limpa Singleton locks órfãos automaticamente
+- Logs separados: `bridge.log` (FastAPI) e `chrome-systemd.log` (Chrome)
+- Units versionadas em `~/cpes-bridge/systemd/` (repo separado)
+- Migração ao vivo: kill processos manuais → `systemctl start cpes-bridge.service` → pool 2/2 healthy
+- Cenário A validado: kill bridge → auto-restart em <14s, pool recupera
+
+**Bugs encontrados:** [Bridge sem auto-restart](BUGS.md#2026-05-15--bridge-sem-auto-restart-reboot-da-odin) (resolvido nesta sessão)
+
+**Decisões:** Nenhuma nova arquitetural — execução de proposta já discutida.
+
+**Estado final:**
+- ✅ 3 user units enabled + active
+- ✅ Linger habilitado
+- ✅ Pool 2/2 healthy
+- ✅ Cenário A (kill manual + auto-restart) passou
+- ⏳ Cenário B (reboot real) **não testado** — Daniel optou por confiar no Cenário A
+- ⏳ Units não commitadas no repo bridgecpe ainda
+
+**Próximos passos:**
+- Commitar `~/cpes-bridge/systemd/*.service` no repo bridgecpe
+- Validar Cenário B na próxima janela de manutenção (opcional — baixa prioridade)
+
+---
+
 ## 2026-05-15 — Fase D.0 + Bridge Pool + PC danewell
 
 **Contexto:** Pós-Fase 2bc fechada. Telemetria de odds implementada mas desligada. Necessidade de captura full coverage pra modelagem quant. Necessidade de redundância no bridge.
