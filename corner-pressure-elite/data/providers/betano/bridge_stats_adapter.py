@@ -21,6 +21,7 @@ mudou.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any, Optional
 
 import aiohttp
@@ -71,26 +72,25 @@ class BridgeStatsAdapter:
     async def get_stats(self, fixture: CanonicalFixture) -> Optional[CanonicalStats]:
         """Busca snapshot do fixture via bridge `/event/<id>/state`.
 
-        **Contrato de retorno** (None com semântica distinta — caller decide
-        comportamento via inspeção do log):
+        **Contrato de retorno**:
 
-        | Cenário bridge / resolução | Retorno | Semântica |
-        |---|---|---|
-        | HTTP 200 com payload válido | `CanonicalStats` | snapshot fresco |
-        | HTTP 304 Not Modified (cache version match) | `None` | sem mudança desde último poll — caller pula persistência |
-        | `fixture_repo` não tem mapping (fixture sem `betano_event_id`) | `None` | jogo não está em produção Betano |
-        | HTTP 4xx/5xx (bridge ou renewer down) | `None` | erro temporário — caller pode retry adaptativo |
-        | Timeout / `aiohttp.ClientError` | `None` | erro temporário — caller pode retry adaptativo |
-        | Payload sem `data.event.liveData` | `None` | schema inválido (cobertura zero da liga) |
+        | Cenário bridge / resolução | Retorno | `is_cached` | Semântica |
+        |---|---|---|---|
+        | HTTP 200 com payload válido | `CanonicalStats` | `False` | snapshot fresco |
+        | HTTP 304 Not Modified, cache interno HIT | `CanonicalStats` cached | `True` | sem mudança; caller usa stats com minute possivelmente "frio" |
+        | HTTP 304 Not Modified, cache interno MISS | re-fetch sem if_version → 200/erro | `False` ou `None` | edge case (cache externo > interno) |
+        | `fixture_repo` não tem mapping | `None` | — | jogo não está em produção Betano |
+        | HTTP 4xx/5xx | `None` | — | erro temporário — caller pode retry adaptativo |
+        | Timeout / `aiohttp.ClientError` | `None` | — | erro temporário |
+        | Payload sem `data.event.liveData` | `None` | — | schema inválido / cobertura zero |
+
+        Orquestrador (PARTE F') usa `is_cached=True` pra:
+        - **Recalcular minute** via `captured_at_ts` + clock próprio (snapshot frio).
+        - **Não duplicar** no `StatsWindowCalculator` (não muda janelas).
+        - **Persistir com flag** `source_freshness='cached'` (opcional, auditoria).
 
         Cache interno de `version` por fixture é usado pra mandar `if_version=N`
-        no próximo poll (304 economiza ~134 KB). Cache de `_last_stats_cache`
-        é puramente defensivo — não é exposto ao caller (304 sempre devolve
-        None pra preservar a semântica "sem novo dado").
-
-        Quem precisa distinguir "304" de "erro" deve olhar os logs (`bridge_stats.*`).
-        Pra MVP não vale a pena introduzir Result/Either — todos os cenários
-        None terminam no mesmo caminho (worker não persiste, próximo tick retry).
+        no próximo poll (304 economiza ~134 KB de payload).
         """
         event_id = await self._resolve_event_id(fixture)
         if not event_id:
@@ -109,18 +109,37 @@ class BridgeStatsAdapter:
             session = await self._session_instance()
             async with session.get(url, params=params) as resp:
                 if resp.status == 304:
-                    log.debug(
-                        "bridge_stats.unchanged fixture=%d event=%d version=%s",
-                        fixture.fixture_id, event_id, cached_version,
+                    cached_stats = self._last_stats_cache.get(fixture.fixture_id)
+                    if cached_stats is not None:
+                        log.debug(
+                            "bridge_stats.unchanged fixture=%d event=%d version=%s cached_age=%ss",
+                            fixture.fixture_id, event_id, cached_version,
+                            _cached_age_seconds(cached_stats),
+                        )
+                        return replace(cached_stats, is_cached=True)
+                    # Cache interno MISS + 304 externo: re-pede sem if_version
+                    # pra repopular o cache. Edge case (acontece pós-restart).
+                    log.info(
+                        "bridge_stats.cache_miss_on_304 fixture=%d event=%d — refetching",
+                        fixture.fixture_id, event_id,
                     )
-                    return None
-                if resp.status >= 400:
-                    log.warning(
-                        "bridge_stats.http_error fixture=%d event=%d status=%s",
-                        fixture.fixture_id, event_id, resp.status,
-                    )
-                    return None
-                payload = await resp.json()
+                    async with session.get(url) as resp2:
+                        if resp2.status != 200:
+                            log.warning(
+                                "bridge_stats.refetch_unexpected_status fixture=%d "
+                                "event=%d status=%s",
+                                fixture.fixture_id, event_id, resp2.status,
+                            )
+                            return None
+                        payload = await resp2.json()
+                else:
+                    if resp.status >= 400:
+                        log.warning(
+                            "bridge_stats.http_error fixture=%d event=%d status=%s",
+                            fixture.fixture_id, event_id, resp.status,
+                        )
+                        return None
+                    payload = await resp.json()
         except aiohttp.ClientError as e:
             log.warning(
                 "bridge_stats.client_error fixture=%d event=%d err=%s",
@@ -132,7 +151,7 @@ class BridgeStatsAdapter:
         if stats is None:
             return None
 
-        # Atualiza caches.
+        # Atualiza caches (fresh — is_cached fica False, default do dataclass).
         if stats.version is not None:
             self._version_cache[fixture.fixture_id] = stats.version
         self._last_stats_cache[fixture.fixture_id] = stats
@@ -184,6 +203,11 @@ class BridgeStatsAdapter:
         results = live.get("results") or {}
         score = live.get("score") or {}
         clock = live.get("clock") or {}
+
+        captured_at_raw = payload.get("captured_at")
+        captured_at_ts: Optional[float] = None
+        if isinstance(captured_at_raw, (int, float)):
+            captured_at_ts = float(captured_at_raw)
 
         version = payload.get("version")
         if isinstance(version, str):
@@ -247,6 +271,8 @@ class BridgeStatsAdapter:
             corners_last_10min=None,
             yellow_last_5min=None,
             yellow_last_10min=None,
+            captured_at_ts=captured_at_ts,
+            # is_cached default False (override no caller pra 304 HIT).
         )
 
 
@@ -266,3 +292,11 @@ def _safe_float(value: Any, *, fallback: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return fallback
+
+
+def _cached_age_seconds(stats: CanonicalStats) -> str:
+    """Idade do snapshot cached em segundos. Usado só pra log."""
+    if stats.captured_at_ts is None:
+        return "?"
+    import time
+    return f"{int(time.time() - stats.captured_at_ts)}"

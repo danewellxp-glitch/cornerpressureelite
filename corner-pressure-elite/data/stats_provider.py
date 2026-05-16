@@ -71,6 +71,27 @@ class CanonicalStats:
     corners_last_10min: Optional[int] = None
     yellow_last_5min: Optional[int] = None
     yellow_last_10min: Optional[int] = None
+    captured_at_ts: Optional[float] = None
+    """Unix timestamp (segundos) do snapshot. Bridge devolve em
+    `payload.captured_at`; AF/Fase A deixam None. Usado pelo orquestrador
+    pra recalcular minuto quando snapshot vem cached (`is_cached=True`)."""
+    is_cached: bool = False
+    """True quando snapshot vem do cache interno do adapter (304 Not Modified).
+
+    Implicações pra orquestrador (PARTE F'):
+    - `minute` pode estar congelado (no momento do último 200) — recalcular via
+      `minute_atual = cached.minute + int((now - cached.captured_at_ts) / 60)`
+    - `StatsWindowCalculator.add_snapshot` NÃO deve ser chamado de novo (evita
+      duplicata no histórico de janelas)
+    - `stats_history` pode persistir com flag `source_freshness='cached'` pra
+      auditoria (vs `'fresh'` quando is_cached=False)
+    - Log diferenciado: `stats fixture=X cached_age=Ns` vs `stats fresh`
+
+    Convenção:
+    - Adapter retorna `is_cached=True` quando 304 com cache HIT
+    - Adapter retorna `is_cached=False` em todos outros caminhos (200 fresh,
+      304 com cache MISS + re-fetch que veio 200, etc)
+    """
 
     @property
     def has_window_stats(self) -> bool:

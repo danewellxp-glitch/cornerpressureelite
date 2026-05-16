@@ -120,22 +120,56 @@ async def test_get_stats_returns_canonical_stats_on_200():
 
 
 @pytest.mark.asyncio
-async def test_get_stats_returns_none_on_304():
-    """304 = sem novo dado → None (caller pula persistência)."""
-    session = _FakeSession([_FakeResponse(304)])
+async def test_get_stats_returns_cached_with_is_cached_true_on_304_hit():
+    """304 + cache interno HIT → retorna stats cached com is_cached=True."""
+    fresh_payload = _bridge_payload(version=1367, corners_h=3, corners_a=1)
+    session = _FakeSession([
+        _FakeResponse(200, fresh_payload),  # 1º poll: 200 fresh, popula cache
+        _FakeResponse(304),                 # 2º poll: 304 bate cache
+    ])
     adapter = BridgeStatsAdapter(
         bridge_url="http://bridge:8080",
         fixture_repo=_FakeRepo(event_id=42),
         session=session,
     )
-    # Pre-populate version cache pra adapter mandar if_version.
-    adapter._version_cache[999] = 1367
+
+    first = await adapter.get_stats(_fixture(999))
+    assert first is not None and first.is_cached is False
+
+    second = await adapter.get_stats(_fixture(999))
+    assert second is not None
+    assert second.is_cached is True
+    # Mesmo conteúdo do fresh (cache devolve a referência via replace).
+    assert second.corners_home == first.corners_home
+    assert second.version == first.version
+    # 2º request mandou if_version=cached.version.
+    _, params2 = session.requests[1]
+    assert params2 == {"if_version": 1367}
+
+
+@pytest.mark.asyncio
+async def test_get_stats_refetch_when_304_with_cache_miss():
+    """304 + cache interno MISS (pós-restart) → re-fetch sem if_version → 200."""
+    payload = _bridge_payload(version=42)
+    session = _FakeSession([
+        _FakeResponse(304),           # 304 mas cache interno vazio
+        _FakeResponse(200, payload),  # re-fetch traz fresh
+    ])
+    adapter = BridgeStatsAdapter(
+        bridge_url="http://bridge:8080",
+        fixture_repo=_FakeRepo(event_id=42),
+        session=session,
+    )
+    adapter._version_cache[999] = 99  # simula version stale sem stats cache
 
     stats = await adapter.get_stats(_fixture(999))
-    assert stats is None
-    # Confirma que mandou if_version no params.
-    url, params = session.requests[0]
-    assert params == {"if_version": 1367}
+    assert stats is not None
+    assert stats.is_cached is False
+    assert stats.version == 42
+    # 2 requests feitas (1 com if_version=99, 1 sem).
+    assert len(session.requests) == 2
+    assert session.requests[0][1] == {"if_version": 99}
+    assert session.requests[1][1] == {}
 
 
 @pytest.mark.asyncio
@@ -210,3 +244,20 @@ async def test_get_stats_updates_version_cache_after_200():
     )
     await adapter.get_stats(_fixture(123))
     assert adapter._version_cache[123] == 999
+
+
+@pytest.mark.asyncio
+async def test_get_stats_populates_captured_at_ts_from_payload():
+    """captured_at_ts vem de payload.captured_at (unix seconds)."""
+    payload = _bridge_payload(version=1)
+    payload["captured_at"] = 1778900000
+    session = _FakeSession([_FakeResponse(200, payload)])
+    adapter = BridgeStatsAdapter(
+        bridge_url="http://bridge:8080",
+        fixture_repo=_FakeRepo(event_id=42),
+        session=session,
+    )
+    stats = await adapter.get_stats(_fixture(123))
+    assert stats is not None
+    assert stats.captured_at_ts == 1778900000.0
+    assert stats.is_cached is False  # default
