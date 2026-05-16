@@ -23,7 +23,7 @@ from typing import Optional
 import httpx
 
 from data.discovery.fixture_matcher import FixtureMatcher
-from data.repositories.betano_team_map import BetanoTeamMapRepo
+from data.repositories.betano_team_map import BetanoTeamEntry, BetanoTeamMapRepo
 from data.repositories.fixture_map import FixtureMapRepo
 
 log = logging.getLogger("cpes.worker.betano_discovery")
@@ -55,6 +55,9 @@ class BetanoFixtureDiscovery:
         # Cache simples por ciclo do schedule (evita re-fetch desnecessário)
         self._schedule_cache: list[dict] = []
         self._schedule_cache_date: Optional[str] = None
+        # Refresh do catálogo de teams: 1×/dia (24h em segundos)
+        self._teams_refresh_interval_sec: int = 86400
+        self._last_teams_refresh: float = 0.0
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -80,12 +83,60 @@ class BetanoFixtureDiscovery:
     async def _loop(self) -> None:
         while True:
             try:
+                # Refresh catálogo de teams 1×/dia (não-bloqueante: falha não para o tick)
+                if (time.time() - self._last_teams_refresh) > self._teams_refresh_interval_sec:
+                    try:
+                        await self._refresh_teams_catalog()
+                        self._last_teams_refresh = time.time()
+                    except Exception:
+                        log.exception("refresh_teams_catalog falhou — segue pro tick")
                 await self._tick()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 log.exception("Erro no ciclo de descoberta — continua")
             await asyncio.sleep(self._poll_sec)
+
+    async def _refresh_teams_catalog(self) -> None:
+        """Baixa catálogo Betano via bridge /teams + bulk_upsert em betano_team_map.
+
+        UPSERT preserva api_football_team_id resolvido (COALESCE no SQL).
+        match_method='static_catalog' marca teams vindos do refresh — distingue
+        de 'fuzzy' (resolvido pelo matcher) e 'manual' (override).
+        """
+        url = f"{self._bridge_url}/teams"
+        log.info("refresh catálogo teams Betano iniciado")
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                r = await client.get(url, params={"sport": self._sport})
+            r.raise_for_status()
+        except httpx.HTTPError as e:
+            log.warning("bridge /teams falhou: %s — refresh adiado", e)
+            return
+
+        payload = r.json()
+        raw_teams = payload.get("teams", []) or []
+        if not raw_teams:
+            log.warning("/teams retornou catálogo vazio — refresh skipped")
+            return
+
+        entries = [
+            BetanoTeamEntry(
+                betano_team_id=int(t["team_id"]),
+                betano_team_name=t.get("name", "") or "",
+                api_football_team_id=None,
+                api_football_team_name=None,
+                match_method="static_catalog",
+                match_confidence=None,
+            )
+            for t in raw_teams
+            if t.get("team_id") is not None and t.get("name")
+        ]
+        n = await self._team_repo.bulk_upsert(entries)
+        log.info(
+            "refresh catálogo OK: count=%d upserted=%d from_cache=%s sport=%s",
+            len(raw_teams), n, payload.get("from_cache"), self._sport,
+        )
 
     async def _tick(self) -> None:
         """1 ciclo de descoberta. Fail-soft: 1 erro não para o loop."""
