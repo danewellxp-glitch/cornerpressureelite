@@ -208,3 +208,32 @@ Chrome 148 do pool **continua ativo** no danewell (Xvfb :100, CDP 9223 LAN-expos
 - ❌ Complexidade operacional (2 Chromes pra monitorar)
 
 **Status:** ATIVA. Próxima evolução: PC em outra rede ou proxy residencial pra diversificar IP.
+
+---
+
+## 2026-05-16 — Fase E.1 stats Betano via `/danae-webapi/api/live/events/<id>/latest` (CASO α)
+
+**Contexto:** Fase E exige substituir runtime de stats da API-Football pelo Betano direto (eliminar dependência do crédito AF). Antes de E.1 (implementação), E.0 mapeia endpoints disponíveis. Investigação feita 2026-05-16 sobre captura mitm 2026-05-15 já existente (zero risco, sem novo tráfego no IP residencial).
+
+**Decisão:** **CASO α — API JSON nativa.** Adapter de stats vai consumir `/danae-webapi/api/live/events/<id>/latest` (mesma família Danae já usada por D.1 pra discovery). Reusa pipeline D.1 existente: Brave do pool (danewell:9224) com cookie `_cfuvid` aquecido, `fetch()` via CDP raw no renewer. Bridge da odin adiciona rota `/event/<id>/state` que proxia + normaliza.
+
+Schema completo + cobertura comparativa em [`architecture/betano-stats-api.md`](architecture/betano-stats-api.md). Resumo: `event.liveData.results` cobre todas métricas usadas hoje (`corners`, `yellow`, `shots`, `score`, `clock.secondsSinceStart`) + bonus `xGoals`. `event.incidents[]` cobre timeline rica (GOAL, YELL, CRNR, OFFS, SUBS, PENL, StoppageTime, etc.) pra reconstrução fina de janelas.
+
+**Alternativas consideradas:**
+- **CASO β (page parsing DOM)** — descartado: API JSON existe e é mais robusta
+- **WebSocket `/sbpitches/statsstream/matchhub`** — adiado pra E.2 (push real-time se polling 60s ficar lento)
+- **API-Football mantido como primário** — descartado: objetivo da Fase E é justamente eliminar dependência
+
+**Trade-offs:**
+- ✅ Reusa **100%** da infra D.1 (Brave + renewer + cookies) — incremento marginal mínimo
+- ✅ Cobre todas métricas atuais + xG (não existe na AF)
+- ✅ Clock em segundos (vs minutos na AF) → janelas mais precisas
+- ✅ Polling 60s no `/latest` (`version` incrementa) detecta mudanças sem reparsing
+- ❌ `event.statistics.*` (16 stat IDs numéricos) é opaco — usar só `liveData.results` (cobertura suficiente)
+- ❌ Cobertura varia por liga (`coverage_level`) — algumas ligas só têm `corners`. Normalizador trata como `0`/`None`
+- ❌ Sem `shots_on_target` e `possession%` (AF tem) — gap aceitável pra MVP, reavaliar se modelo exigir
+- ❌ Risco de schema mudar (Danae não-documentada) — mitigado por monitorar `version` no response
+
+**Estimativa Fase E.1 atualizada:** 6-10h (vs 10-14h originalmente). Redução porque infra D.1 já está em produção e estável.
+
+**Status:** ATIVA, implementação E.1 pendente.
