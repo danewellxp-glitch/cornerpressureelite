@@ -238,12 +238,24 @@ A captura mitm não pegou WebSocket frames (tipo `websocket` aparece como 0 no .
 │  cpes-bridge │ ──────────────────► │ cookie-renewer       │ ─────────────────► │  Brave do pool       │
 │   (odin)     │                     │ (danewell:8081)      │                    │  (CDP raw, Xvfb :101)│
 │              │ ◄────────────────── │ proxy + normalize    │ ◄───────────────── │  fetch() → Danae API │
-└──────────────┘   JSON ~6s          └──────────────────────┘  JSON ~5s          └──────────────────────┘
-                                                                                          │
-                                                                                          ▼
+└──────────────┘   JSON ~6s          └──────────────────────┘  JSON ~5s          └──────────────┬───────┘
+                                                                                                │
+                                                                                                ▼
+                                                                              tinyproxy local (127.0.0.1:8888)
+                                                                                                │ injeta auth
+                                                                                                ▼
+                                                                              Proxy residencial RJ (ML Telecom)
+                                                                                                │
+                                                                                                ▼
                                                                                   Betano /danae-webapi/...
                                                                                   (passa Cloudflare ✅)
 ```
+
+**Egress isolado por browser** (configurado em 2026-05-15 23h05):
+- **Brave** → proxy residencial RJ (`200.234.172.57` ML Telecom AS10704) → Danae API
+- **Chrome** → IP casa V tal Curitiba (`200.181.212.29`) → markets via Playwright/CDP
+
+Diversifica fingerprint de IP por rota. Cloudflare flagar um IP não derruba o outro caminho.
 
 Bridge da odin (`/events/live`) faz proxy HTTP simples ao danewell + filtro de esports/virtuais via heurística:
 - `zone_name in {Esoccer, Virtuais, Cyber, Esports}` → virtual

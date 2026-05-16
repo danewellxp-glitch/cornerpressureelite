@@ -17,6 +17,37 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-15 (sessão 4 — extensão proxy) — Proxy residencial no Brave
+
+**Contexto:** Pós-D.1 funcional. Daniel comprou proxy residencial brasileiro (ML Telecom RJ, `200.234.172.57:43958`) pra diversificar IP de saída do pool Brave. Risco a mitigar: Cloudflare reflagar IP único da casa (V tal Curitiba) cortaria tudo de uma vez.
+
+**O que foi feito:**
+- Validação prévia do proxy via curl (da odin): IP brasileiro residencial real (não datacenter), latência ~800ms, aceita HTTPS
+- **No danewell** (Claude lá): Chromium 148 não aceita auth inline em `--proxy-server`. Solução escalada pra Alt-B do plano original: `tinyproxy-betano.service` local em `127.0.0.1:8888` que injeta auth no upstream. Brave conecta no tinyproxy sem auth.
+- Unit `brave-betano.service` ganhou `--proxy-server=http://127.0.0.1:8888`. Backup imutável da unit pré-proxy (`.pre-proxy-2026-05-15`) pra rollback rápido.
+- **Chrome do pool intocado** — continua sem proxy, IP da casa, atendendo `/markets`/`/quote` pra cpes-bridge da odin via Playwright/CDP porta 9223.
+
+**Validações:**
+- `curl -x 127.0.0.1:8888 ipinfo.io` (no danewell): `200.234.172.57` ✓
+- Brave fetch ipinfo via CDP: `200.234.172.57` (egress proxy) ✓
+- Chrome fetch ipinfo via CDP: `200.181.212.29` (egress casa intacto) ✓
+- `/danae/live?sport=FOOT`: 200, count=37, 4.66s ✓
+- Bridge da odin `/events/live`: 200, count=15, 4.95s, names completos, jogos reais NWSL EUA + Liga 1 Peru ✓
+
+**Decisões:** [Isolamento de egress por browser pool](DECISIONS.md#2026-05-15-sessão-4--extensão-proxy--isolamento-de-egress-por-browser-pool)
+
+**Estado final:**
+- ✅ 2 IPs distintos pra Betano (RJ pro Brave, Curitiba pro Chrome)
+- ✅ Latência D.1 inalterada (~5s — proxy 800ms absorvido pelo wait fixo de 3s)
+- ✅ Bridge da odin sem mudança (proxy é transparente do lado dela)
+- ⚠️ Credenciais do proxy visíveis em `systemctl cat brave-betano` — mover pra arquivo chmod 600 em fase 2
+
+**Próximos passos:**
+- Continuar pra Fase D.2 (cpes-main consome /events/live)
+- Monitorar se IP do proxy não vira flag também (alguns proxies residenciais são reciclados rápido)
+
+---
+
 ## 2026-05-15→16 (sessão 4) — D.1 funcional end-to-end via danewell renewer
 
 **Contexto:** Sessão 3 deixou plano de implementar D.1 com httpx + cookies extraídos do .mitm. Sessão 4 começou implementando isso e bateu em sucessivos blockers até descobrir a arquitetura final.

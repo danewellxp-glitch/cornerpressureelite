@@ -103,6 +103,35 @@ Chrome 148 do pool **continua ativo** no danewell (Xvfb :100, CDP 9223 LAN-expos
 
 ---
 
+## 2026-05-15 (sessão 4 — extensão proxy) — Isolamento de egress por browser pool
+
+**Contexto:** Após D.1 funcional, comprado proxy residencial brasileiro (ML Telecom RJ, `200.234.172.57:43958`) pra diversificar IP de saída do Brave (que atende Danae API). IP da casa (V tal Curitiba, `200.181.212.29`) é único hoje pra tudo — se Cloudflare reflagar, perde tudo junto.
+
+**Decisão:** Aplicar proxy SOMENTE no Brave do pool (rota Danae API). Chrome do pool (rota markets/quote) mantém saída pelo IP da casa. Wrapper via `tinyproxy-betano.service` local em `127.0.0.1:8888` que injeta auth no upstream — Chromium 148 não suporta auth inline em `--proxy-server` (Alt-A do plano original falhou, escalou pra Alt-B).
+
+**Isolamento intencional:**
+- Brave → proxy ML Telecom RJ → `/danae-webapi/*` (D.1 listagem)
+- Chrome → IP casa V tal Curitiba → `/odds/<id>/` (D.0 markets via Playwright)
+
+**Alternativas consideradas:**
+- Proxy em ambos browsers — perde diversificação, single point of failure
+- Auth inline na `--proxy-server` — Chromium 148 ignora credenciais inline em HTTP proxies (validado)
+- PAC URL — overkill pra 1 proxy
+- VPN sistema-wide — afetaria tudo (WAHA, dashboard, SSH, etc), inviável
+
+**Trade-offs:**
+- ✅ Diversificação: 2 IPs distintos, redução de blast radius se 1 flaguear
+- ✅ Brave proxy é residencial brasileiro real (ML Telecom RJ) — Cloudflare aceita
+- ✅ Chrome intacto pra `/markets` continua via IP casa (sem mudança de comportamento)
+- ✅ Latência D.1 inalterada (~5s — overhead 800ms do proxy é absorvido pelo wait fixo de 3s do renewer)
+- ❌ Custo recorrente do proxy
+- ❌ Credenciais visíveis em `systemctl cat brave-betano` (mitigar movendo pra arquivo chmod 600 em fase 2)
+- ❌ Mais infra (tinyproxy + 1 service novo), mais coisa pra monitorar
+
+**Status:** ATIVA. Brave egress validado em ML Telecom RJ. /events/live continua retornando 15+ eventos reais em ~5s. Rollback documentado no [BRIEFING-ODIN-2026-05-15 (2).md](../BRIEFING-ODIN-2026-05-15%20(2).md) com backup imutável da unit pré-proxy.
+
+---
+
 ## 2026-05-15 (sessão 3) — D.1 vai usar API HTTP nativa, não DOM scrape
 
 **Contexto:** Plano original da Fase D.1 (descoberta automática de eventos) era usar Playwright via bridge pra abrir listagens (`/live/`, `/sport/futebol/`) e parsear DOM/links. Investigação via mitmproxy (capturado no PC do daniel, não-flagueado) descobriu que a Betano expõe `/danae-webapi/api/live/overview/latest` — JSON estruturado com 301 eventos ao vivo, schemas completos de leagues/zones/sports, auth só via cookie `_cfuvid`.
