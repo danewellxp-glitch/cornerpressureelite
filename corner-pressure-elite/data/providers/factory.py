@@ -90,8 +90,34 @@ async def build_providers(
             persistence_worker=odds_persistence_worker,
         )
 
+        # ----- Stats stack — depende de USE_BETANO_STATS (PARTE F') -----
+        composite_stats: CompositeStatsProvider
+        bridge_stats_adapter = None
+        if use_betano_stats:
+            from .betano.bridge_stats_adapter import BridgeStatsAdapter
+
+            bridge_stats_adapter = BridgeStatsAdapter(
+                bridge_url=getattr(settings, "BETANO_BRIDGE_URL", "http://localhost:8080"),
+                fixture_repo=fixture_repo,
+                timeout_seconds=float(
+                    getattr(settings, "BETANO_BRIDGE_TIMEOUT_SEC", 25.0)
+                ),
+            )
+            composite_stats = CompositeStatsProvider(
+                [bridge_stats_adapter, af_stats], drift_check=drift,
+            )
+            log.info(
+                "providers.bridge_stats enabled primary=bridge_betano fallback=apifootball drift=%s",
+                drift,
+            )
+        else:
+            composite_stats = CompositeStatsProvider([af_stats], drift_check=drift)
+            log.info("providers.bridge_stats disabled — stats apifootball-only")
+
         async def _bridge_shutdown() -> None:
             await bridge_client.close()
+            if bridge_stats_adapter is not None:
+                await bridge_stats_adapter.close()
 
         log.info(
             "providers.bridge_stack primary=betano_bridge fallback=apifootball drift=%s min_score=%d",
@@ -103,7 +129,7 @@ async def build_providers(
                 drift_check=drift,
                 persistence_worker=odds_persistence_worker,
             ),
-            CompositeStatsProvider([af_stats], drift_check=drift),
+            composite_stats,
             _bridge_shutdown,
         )
 

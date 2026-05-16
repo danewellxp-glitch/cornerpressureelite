@@ -21,10 +21,9 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 from data.odds_provider import CanonicalFixture
-from data.providers.betano.bridge_stats_adapter import BridgeStatsAdapter
 from data.repositories.stats_history import StatsHistoryEntry, StatsHistoryRepo
 from data.services.stats_window_calculator import StatsWindowCalculator
 from data.stats_provider import CanonicalStats
@@ -32,10 +31,17 @@ from data.stats_provider import CanonicalStats
 log = logging.getLogger("cpes.workers.betano_stats")
 
 
+class _StatsSource(Protocol):
+    """Subset do StatsProvider Protocol que o worker usa. Aceita
+    BridgeStatsAdapter direto OU CompositeStatsProvider (cascata + AF fallback)."""
+
+    async def get_stats(self, fixture: CanonicalFixture) -> Optional[CanonicalStats]: ...
+
+
 class BetanoStatsWorker:
     def __init__(
         self,
-        adapter: BridgeStatsAdapter,
+        adapter: _StatsSource,
         repo: StatsHistoryRepo,
         calculator: StatsWindowCalculator,
         bootstrap_lookback_min: int = 20,
@@ -48,27 +54,45 @@ class BetanoStatsWorker:
 
     async def poll(self, fixture: CanonicalFixture) -> Optional[CanonicalStats]:
         """Roda 1 ciclo de captura+enrichment+persistência. Retorna `CanonicalStats`
-        com janelas preenchidas, ou `None` se nada novo (304/erro/sem mapping).
+        com janelas preenchidas, ou `None` se nada novo (404/erro/sem mapping).
 
-        Bootstrap implícito: se 1ª vez vendo `fixture`, hidrata calculator
-        antes de capturar.
+        **Tratamento de `is_cached=True`** (snapshot vindo do cache interno do
+        adapter, 304 HIT do bridge):
+        - NÃO chama `add_snapshot` no calculator (evita duplicata no deque).
+        - Computa janelas com o deque atual (mesmo valor do poll anterior fresh).
+        - Persiste com `raw.freshness='cached'` pra auditoria. INSERT é
+          idempotente via `ON CONFLICT (fixture, source, version) DO NOTHING`,
+          então duplicate é no-op no DB de qualquer jeito.
+
+        Bootstrap implícito: 1ª vez vendo `fixture`, hidrata calculator antes.
         """
         if fixture.fixture_id not in self._bootstrapped:
             await self.bootstrap_fixture(fixture.fixture_id)
 
         snapshot = await self._adapter.get_stats(fixture)
         if snapshot is None:
-            # 304/erro/sem mapping — caller decide se faz retry adaptativo.
             return None
 
-        # Push no calculator + computa janelas.
         captured_at = self._captured_at_from_snapshot(snapshot)
-        self._calculator.add_snapshot(
-            fixture_id=snapshot.fixture_id,
-            captured_at=captured_at,
-            corners_total=snapshot.corners_home + snapshot.corners_away,
-            yellow_total=snapshot.yellow_cards_home + snapshot.yellow_cards_away,
-        )
+
+        if not snapshot.is_cached:
+            # Snapshot fresco — atualiza deque do calculator.
+            self._calculator.add_snapshot(
+                fixture_id=snapshot.fixture_id,
+                captured_at=captured_at,
+                corners_total=snapshot.corners_home + snapshot.corners_away,
+                yellow_total=snapshot.yellow_cards_home + snapshot.yellow_cards_away,
+            )
+            freshness = "fresh"
+        else:
+            # Snapshot cached — NÃO duplica no deque. Janelas serão calculadas
+            # com o deque atual (estado do último fresh).
+            freshness = "cached"
+            log.debug(
+                "betano_stats_worker.cached fixture=%d version=%s — skipping deque add",
+                snapshot.fixture_id, snapshot.version,
+            )
+
         windows = self._calculator.compute_windows(snapshot.fixture_id, now=captured_at)
 
         enriched = replace(
@@ -80,13 +104,11 @@ class BetanoStatsWorker:
         )
 
         try:
-            await self._repo.insert(_to_entry(enriched, captured_at))
+            await self._repo.insert(_to_entry(enriched, captured_at, freshness))
         except Exception as e:
-            # UNIQUE violation em (fixture, source, version) = duplicate snapshot;
-            # qualquer outra é WARN porém não-fatal — caller decide retry.
             log.warning(
-                "betano_stats_worker.persist_error fixture=%d version=%s err=%s",
-                snapshot.fixture_id, snapshot.version, e,
+                "betano_stats_worker.persist_error fixture=%d version=%s freshness=%s err=%s",
+                snapshot.fixture_id, snapshot.version, freshness, e,
             )
 
         return enriched
@@ -126,7 +148,11 @@ class BetanoStatsWorker:
         return datetime.now(timezone.utc)
 
 
-def _to_entry(snap: CanonicalStats, captured_at: datetime) -> StatsHistoryEntry:
+def _to_entry(
+    snap: CanonicalStats, captured_at: datetime, freshness: str = "fresh"
+) -> StatsHistoryEntry:
+    raw_with_freshness = dict(snap.raw) if isinstance(snap.raw, dict) else {}
+    raw_with_freshness["freshness"] = freshness
     return StatsHistoryEntry(
         fixture_id=snap.fixture_id,
         source=snap.source,
@@ -155,5 +181,5 @@ def _to_entry(snap: CanonicalStats, captured_at: datetime) -> StatsHistoryEntry:
         yellow_last_5min=snap.yellow_last_5min,
         yellow_last_10min=snap.yellow_last_10min,
         captured_at=captured_at,
-        raw=snap.raw if isinstance(snap.raw, dict) else None,
+        raw=raw_with_freshness,
     )

@@ -82,6 +82,43 @@ async def test_factory_returns_new_stack_when_flag_on(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_factory_4_caminho_wires_bridge_stats_when_USE_BETANO_STATS_true():
+    """USE_BETANO_BRIDGE=true + USE_BETANO_STATS=true → bridge_stats primary + AF fallback."""
+    settings = _settings(
+        USE_BETANO_BRIDGE=True,
+        USE_BETANO_STATS=True,
+        BETANO_BRIDGE_URL="http://bridge:8080",
+        BETANO_BRIDGE_TIMEOUT_SEC=10.0,
+    )
+    odds, stats, shutdown = await build_providers(settings, _FakeAPIClient())
+    try:
+        # Stats composite: [bridge_betano, apifootball]
+        names = [p.name for p in stats._providers]  # type: ignore[attr-defined]
+        assert names == ["bridge_betano", "apifootball"]
+        # Odds composite: [bridge_betano (odds), apifootball]
+        odds_names = [p.name for p in odds._providers]  # type: ignore[attr-defined]
+        assert "apifootball" in odds_names
+    finally:
+        await shutdown()
+
+
+@pytest.mark.asyncio
+async def test_factory_bridge_path_without_USE_BETANO_STATS_keeps_stats_af_only():
+    """USE_BETANO_BRIDGE=true sem USE_BETANO_STATS → stats permanece AF-only."""
+    settings = _settings(
+        USE_BETANO_BRIDGE=True,
+        USE_BETANO_STATS=False,
+        BETANO_BRIDGE_URL="http://bridge:8080",
+    )
+    odds, stats, shutdown = await build_providers(settings, _FakeAPIClient())
+    try:
+        names = [p.name for p in stats._providers]  # type: ignore[attr-defined]
+        assert names == ["apifootball"]
+    finally:
+        await shutdown()
+
+
+@pytest.mark.asyncio
 async def test_factory_propagates_persistence_worker_to_composite():
     """O worker injetado é guardado no CompositeOddsProvider."""
     class _W:

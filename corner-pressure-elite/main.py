@@ -43,6 +43,9 @@ from config import (
     DEV_TEST_MAX_GAMES,
     DEV_TEST_LOW_BUDGET_THRESHOLD,
     USE_BETANO_BRIDGE,
+    USE_BETANO_STATS,
+    STATS_WINDOW_HISTORY_SIZE,
+    STATS_BOOTSTRAP_LOOKBACK_MIN,
     BETANO_EVENT_MAP,
 )
 import config
@@ -66,9 +69,42 @@ from data.repositories.betano_team_map import BetanoTeamMapRepo
 from data.repositories.odds_history import OddsHistoryRepo
 from data.persistence.odds_worker import OddsPersistenceWorker
 from data.discovery.fixture_matcher import FixtureMatcher
+from data.repositories.stats_history import StatsHistoryRepo
+from data.services.canonical_to_jogo import canonical_to_jogo, recalc_minute_if_cached
+from data.services.stats_window_calculator import StatsWindowCalculator
 from workers.betano_discovery import BetanoFixtureDiscovery
+from workers.betano_stats_worker import BetanoStatsWorker
 
 logger = logging.getLogger("CPES.Main")
+
+
+def _build_canonical_fixture(fixture: Dict, liga_id: int) -> CanonicalFixture:
+    """Constrói `CanonicalFixture` mínimo pra passar pro StatsProvider.
+
+    Fonte: dict do API-Football `fixtures?live=all`. Apenas dados essenciais
+    pro adapter resolver `fixture_id → betano_event_id` via `fixture_repo`.
+    """
+    fixture_info = fixture.get("fixture", {})
+    teams = fixture.get("teams", {})
+    goals = fixture.get("goals", {}) or {}
+    starts_iso = fixture_info.get("date")
+    starts_at: datetime
+    if isinstance(starts_iso, str):
+        try:
+            starts_at = datetime.fromisoformat(starts_iso.replace("Z", "+00:00"))
+        except ValueError:
+            starts_at = datetime.now(timezone.utc)
+    else:
+        starts_at = datetime.now(timezone.utc)
+    return CanonicalFixture(
+        fixture_id=fixture_info.get("id", 0),
+        home_team=teams.get("home", {}).get("name", "?"),
+        away_team=teams.get("away", {}).get("name", "?"),
+        league_id=liga_id,
+        starts_at_utc=starts_at,
+        score_home=goals.get("home", 0) or 0,
+        score_away=goals.get("away", 0) or 0,
+    )
 
 
 def _serialize_fixture(
@@ -119,6 +155,10 @@ class CornerPressureElite:
         # Worker de descoberta automática de fixtures Betano (Fase D.2).
         # Só inicia quando USE_BETANO_BRIDGE=true AND BETANO_DISCOVERY_ENABLED.
         self.betano_discovery: Optional[BetanoFixtureDiscovery] = None
+        # Worker de stats Betano via bridge (Fase E.1 PARTE F'). Só inicia
+        # quando USE_BETANO_BRIDGE=true AND USE_BETANO_STATS=true. Quando None,
+        # _analisar_jogo cai no caminho legado (api_client.get_statistics).
+        self.stats_worker: Optional[BetanoStatsWorker] = None
         # Última captura de telemetria por (fixture_id, market) -> timestamp ms.
         self._last_capture_at: Dict[tuple, int] = {}
         self._running = False
@@ -201,7 +241,7 @@ class CornerPressureElite:
             logger.info("OddsPersistenceWorker iniciado — telemetria de odds ATIVA")
 
             fixture_repo = FixtureMapRepo(self.database.pool)
-            self.composite_odds, _composite_stats, self._providers_shutdown = (
+            self.composite_odds, composite_stats, self._providers_shutdown = (
                 await build_providers(
                     settings=config,
                     api_client=self.api_client,
@@ -210,6 +250,22 @@ class CornerPressureElite:
                 )
             )
             logger.info("CompositeOddsProvider ativo (bridge Betano primário)")
+
+            # Fase E.1 PARTE F': stats Betano via worker (bridge + AF fallback)
+            if USE_BETANO_STATS:
+                stats_history_repo = StatsHistoryRepo(self.database.pool)
+                stats_calculator = StatsWindowCalculator(
+                    history_size=STATS_WINDOW_HISTORY_SIZE,
+                )
+                self.stats_worker = BetanoStatsWorker(
+                    adapter=composite_stats,
+                    repo=stats_history_repo,
+                    calculator=stats_calculator,
+                    bootstrap_lookback_min=STATS_BOOTSTRAP_LOOKBACK_MIN,
+                )
+                logger.info(
+                    "BetanoStatsWorker ativo — stats via bridge (Fase E.1 PARTE F')"
+                )
 
             # Fase D.2: descoberta automática de fixtures Betano via bridge.
             # BETANO_EVENT_MAP segue como override manual; discovery complementa.
@@ -955,14 +1011,37 @@ class CornerPressureElite:
         )
 
         try:
-            # Buscar estatisticas (1 API call — shared by both analyses)
-            stats = await self.api_client.get_statistics(fixture_id)
-
-            # Converter para JogoAoVivo
-            jogo = parse_fixture_to_jogo(fixture, stats, liga_id)
-
-            # Enriquecer com dados de cartoes (0 API calls, mesmas stats)
-            enrich_jogo_with_cards(jogo, stats, liga_id)
+            # ---- Stats: bridge Betano (Fase E.1) OU API-Football (legado) ----
+            if self.stats_worker is not None:
+                # Caminho USE_BETANO_STATS=true: stats live via bridge.
+                # Esqueleto de jogo SEM stats AF (campos zero); canonical_to_jogo
+                # injeta o snapshot do CanonicalStats por cima.
+                jogo = parse_fixture_to_jogo(fixture, [], liga_id)
+                enrich_jogo_with_cards(jogo, [], liga_id)
+                canonical_fixture_for_stats = _build_canonical_fixture(fixture, liga_id)
+                stats_canonical = await self.stats_worker.poll(canonical_fixture_for_stats)
+                if stats_canonical is None:
+                    logger.debug(
+                        "stats_worker.miss fixture=%d — sem snapshot novo (304/erro/sem mapping)",
+                        fixture_id,
+                    )
+                else:
+                    stats_canonical = recalc_minute_if_cached(
+                        stats_canonical, time.time()
+                    )
+                    jogo = canonical_to_jogo(jogo, stats_canonical)
+                    logger.debug(
+                        "stats_worker.applied fixture=%d freshness=%s version=%s minute=%d",
+                        fixture_id,
+                        "cached" if stats_canonical.is_cached else "fresh",
+                        stats_canonical.version,
+                        jogo.minuto,
+                    )
+            else:
+                # Caminho legado: 1 API call AF — shared by both analyses.
+                stats = await self.api_client.get_statistics(fixture_id)
+                jogo = parse_fixture_to_jogo(fixture, stats, liga_id)
+                enrich_jogo_with_cards(jogo, stats, liga_id)
 
             logger.info(
                 f"Analisando: {desc} | Min {jogo.minuto} | "

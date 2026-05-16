@@ -166,6 +166,46 @@ async def test_poll_swallows_repo_insert_error_but_still_returns_stats():
 
 
 @pytest.mark.asyncio
+async def test_poll_with_is_cached_does_not_add_to_calculator_but_persists_with_cached_freshness():
+    """is_cached=True → calculator NÃO ganha snapshot novo; repo recebe freshness=cached."""
+    snap_fresh = _stats(version=1, corners_h=2, corners_a=1, captured_at_ts=1778869800.0)
+    snap_cached = CanonicalStats(
+        **{
+            **{
+                k: getattr(snap_fresh, k)
+                for k in snap_fresh.__dataclass_fields__.keys()
+            },
+            "is_cached": True,
+        }
+    )
+    adapter = _FakeAdapter([snap_fresh, snap_cached])
+    repo = _FakeRepo(history_rows=[])
+    calc = StatsWindowCalculator(history_size=10)
+    worker = BetanoStatsWorker(adapter, repo, calc)
+
+    fix = _fixture(999)
+    await worker.poll(fix)  # 1º: fresh entra no deque
+    await worker.poll(fix)  # 2º: cached NÃO entra
+
+    assert len(repo.inserts) == 2
+    assert repo.inserts[0].raw["freshness"] == "fresh"
+    assert repo.inserts[1].raw["freshness"] == "cached"
+    # Deque tem só 1 snapshot (do fresh) — cached não duplicou.
+    assert len(calc._windows[999]) == 1
+
+
+@pytest.mark.asyncio
+async def test_poll_freshness_fresh_when_not_cached():
+    """is_cached=False (default) → freshness=fresh."""
+    adapter = _FakeAdapter([_stats()])
+    repo = _FakeRepo()
+    calc = StatsWindowCalculator(history_size=10)
+    worker = BetanoStatsWorker(adapter, repo, calc)
+    await worker.poll(_fixture(999))
+    assert repo.inserts[0].raw["freshness"] == "fresh"
+
+
+@pytest.mark.asyncio
 async def test_forget_fixture_clears_calculator_and_marks_for_rebootstrap():
     snap = _stats()
     adapter = _FakeAdapter([snap, snap])
