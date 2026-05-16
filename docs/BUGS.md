@@ -62,6 +62,37 @@ Commit: hash (se aplicável)
 
 ---
 
+## 2026-05-15 — Cookies cf_clearance bound a IP+TLS+UA do Chrome originador
+
+**Sintoma:** Após descobrir endpoint `/danae-webapi/api/live/overview/latest`, primeira tentativa de implementar `/events/live` no bridge da odin foi: extrair cookies frescos via `/cookies/last` do renewer (no danewell) e usar em httpx puro na odin. Sempre 403, mesmo com:
+- Cookies <1min de idade (válidos no Brave que originou)
+- UA exato do Chrome 148 que emitiu o cookie
+- IP da casa idêntico (NAT compartilhado entre odin e danewell)
+- Headers Sec-Fetch-* completos
+- Testado IPv4 e IPv6 separadamente
+- Tentado urllib (stdlib) também — mesmo 403
+
+**Causa raiz:** `cf_clearance` da Cloudflare é **bound a tripla (IP cliente + TLS fingerprint do client + UA exato)**. Replicar 2 dos 3 não é suficiente. Cliente HTTP Python tem TLS handshake (cipher order, extensions) diferente do Chrome — Cloudflare detecta mismatch entre cookie issuer e client atual, rejeita.
+
+Validações que provaram:
+- Cookies do .mitm (capturados do Firefox humano do Daniel) funcionavam em urllib na odin imediatamente, mas pararam após ~30min (não foi expiração — algo no estado do Cloudflare/IP).
+- Cookies do `/cookies/last` do renewer **nunca** funcionaram em curl/httpx/urllib externos.
+- `Playwright.connect_over_cdp` no Chrome do pool danewell + `page.goto` disparou Splash imediato (`__playwright__binding__` detectável).
+- **Único caminho que funciona**: `fetch()` DENTRO do mesmo browser (Brave, no caso) que tem o cookie, via CDP raw (sem Playwright bindings).
+
+**Fix:** Arquitetura D.1 final usa proxy via danewell renewer:
+- Bridge da odin (`/events/live`) → danewell renewer (`/danae/live`) → Brave do pool faz `fetch()` interno → JSON normalizado de volta
+- Bridge não toca em cookies, TLS ou Chrome — só HTTP simples na LAN
+- Detalhes em [DECISIONS.md sessão 4](DECISIONS.md#2026-05-15-sessão-4--d1-final-bridge-proxy-ao-danewell-renewer) e [betano-danae-api.md §4](architecture/betano-danae-api.md)
+
+**Lição:** Cookies de Cloudflare **não são portáteis entre clients HTTP**. Pra usar a sessão de um Chrome aquecido, a request HTTP tem que sair daquele mesmo Chrome. Patterns válidos:
+1. `fetch()` dentro do browser via CDP raw (`Runtime.evaluate` com `awaitPromise: true`)
+2. Proxy do tráfego inteiro pelo browser (mais complexo, não fizemos)
+
+**Lição adicional descoberta no caminho:** **TLS fingerprint do Chrome 148 desktop Linux x86_64 está discriminado** especificamente em `/danae-webapi/*` da Betano. Mesmo profile fresco + flags stealth, Chrome 148 retorna Splash. **Brave 1.90.122 (Chromium 148, mas TLS diferente + `navigator.brave` exposto) passa**. Solução: instalar Brave em paralelo no danewell, usar dele pra Danae API. Chrome continua útil pra `/odds/<id>/` (mercados via Playwright) que não passam por `/danae-webapi/*`.
+
+---
+
 ## 2026-05-15 — IP residencial flagueado pela Cloudflare Bot Management
 
 **Sintoma:** Após investigação D.1 via Playwright, todas as URLs da Betano (incluindo páginas de jogo individuais que sempre funcionaram) começaram a retornar **"Betano Splash Screen"** com `body.innerText: 0 chars`. Mensagem visível: *"Access to this page is restricted due to security and compliance measures"*. Pool 2/2 ainda mostrava `healthy` (CDP responde), mas Chrome ambos endpoints recebiam Splash. Bridge `/markets` retornava `text_len=0, page_title="Betano Splash Screen"`.

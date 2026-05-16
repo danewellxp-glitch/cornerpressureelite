@@ -211,19 +211,57 @@ A página live carrega:
 
 A captura mitm não pegou WebSocket frames (tipo `websocket` aparece como 0 no .mitm — provavelmente porque mitmweb default não captura WS sem flag explícita). Pra atualizar o overview em tempo real, a página subscribe via SignalR; pra polling simples, basta refazer `/danae-webapi/api/live/overview/latest` periodicamente (response inclui `version` pra detectar mudança).
 
-## 4. Implicações pra arquitetura do bridge
+## 4. Arquitetura real (descoberta dolorosa em 2026-05-15)
 
-Hoje o bridge usa Playwright via CDP pra abrir `/live/_/<id>/` e regex no `body.innerText`. Latência típica 8s/captura.
+### 4.1 O que NÃO funciona — comprovado
 
-Com a Danae API:
-- **Listagem** (D.1): HTTP request direta, latência ~150ms
-- **Estado de evento individual** (D.0): pode evoluir de Playwright pra HTTP request via 2.4 — testar se cobre todos os mercados que a página renderiza
-- **Catálogos** (D.2): cache de leagues/teams atualizado 1×/dia
-- **Stats** (Phase E): novo endpoint de stats nativo
+**Cookies não transportam.** `cf_clearance` é bound a `(IP + TLS fingerprint + UA)` do Chrome originador. Extrair via `/cookies/last` do renewer e usar em httpx/curl/urllib externos **sempre retorna 403**, mesmo:
+- Mesmo IP (testado IPv4 e IPv6)
+- UA exato do Chrome 148
+- Cookies frescos (<1min idade)
+- Headers Sec-Fetch-* completos
 
-**Chrome continua necessário só pra:**
-1. Renovar `_cfuvid` cookie periodicamente (warmup loop ~30min)
-2. Casos onde JSON não cobre (mercados específicos, ainda a investigar)
+**Chrome 148 desktop Linux x86_64 está bloqueado** especificamente em `/danae-webapi/*` da Betano. Mesmo profile recém-criado, com flags stealth (`--disable-blink-features=AutomationControlled`), Cloudflare retorna Splash. Sintoma colateral: a própria SPA da Betano em `/live/` aberta nesse Chrome **fica em loading vazio** — o JS dela também recebe 403 ao tentar Danae internamente.
+
+**Playwright via CDP no Chrome do pool** dispara Splash imediato — Cloudflare detecta `__playwright__binding__` injetado no window mesmo via CDP raw da Playwright.
+
+### 4.2 O que funciona — solução final
+
+**Brave 1.90.122 (Chromium 148)** tem TLS handshake suficientemente diferente do Chrome 148 + `navigator.brave` exposto. Cloudflare deixa passar em `/danae-webapi/*`. Roda no danewell em paralelo ao Chrome (display :101, CDP loopback :9224).
+
+**`fetch()` DENTRO do Brave via CDP raw (sem Playwright)** funciona — usa cookies + TLS + IP + UA reais do browser que originou a sessão Cloudflare.
+
+### 4.3 Pipeline final D.1
+
+```
+┌──────────────┐  GET /events/live   ┌──────────────────────┐  GET /danae/live   ┌──────────────────────┐
+│  cpes-bridge │ ──────────────────► │ cookie-renewer       │ ─────────────────► │  Brave do pool       │
+│   (odin)     │                     │ (danewell:8081)      │                    │  (CDP raw, Xvfb :101)│
+│              │ ◄────────────────── │ proxy + normalize    │ ◄───────────────── │  fetch() → Danae API │
+└──────────────┘   JSON ~6s          └──────────────────────┘  JSON ~5s          └──────────────────────┘
+                                                                                          │
+                                                                                          ▼
+                                                                                  Betano /danae-webapi/...
+                                                                                  (passa Cloudflare ✅)
+```
+
+Bridge da odin (`/events/live`) faz proxy HTTP simples ao danewell + filtro de esports/virtuais via heurística:
+- `zone_name in {Esoccer, Virtuais, Cyber, Esports}` → virtual
+- `league_name` contém `minutos de jogo`/`esports`/`H2H GG`/`GT Leagues` → virtual
+
+Param `?include_virtuals=true` desliga filtro.
+
+**Chrome do pool continua usado pra `/markets` e `/quote`** (Playwright/CDP via porta 9223 LAN-exposed), porque esse fluxo abre `/odds/<id>/` e `/live/<id>/` que **não passam por** `/danae-webapi/*` e não são bloqueados pelo TLS-fingerprint discrimination.
+
+### 4.4 O field `name` — atenção
+
+A Danae API **não retorna campo `name` no nível do evento**. O nome de match precisa ser construído a partir de `participants[]`:
+- 2 participants com `isHome` marcado: `"<home> vs <away>"`
+- 2 sem `isHome`: `"<p0> vs <p1>"`
+- 3+ (golfe/torneios outright): `" vs ".join(names)`
+- Sem participants (especiais): humanizar slug do `url`
+
+O renewer do danewell já faz essa derivação no normalize. Resposta do `/danae/live` inclui tanto `name` derivado quanto `participants[]` cru (com `{name, is_home, team_id}`) pra bridge poder reformatar se quiser.
 
 ## 5. Riscos
 

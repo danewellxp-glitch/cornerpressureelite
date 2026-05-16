@@ -67,6 +67,42 @@ Status: ativa / superada (linkando decisão que substituiu)
 
 ---
 
+## 2026-05-15 (sessão 4) — D.1 final: bridge proxy ao danewell renewer
+
+**Contexto:** Sessão 3 decidiu D.1 via HTTP nativo (Danae API). Sessão 4 tentou implementar isso direto da odin com httpx + cookies extraídos. **Não funcionou** — após validações exaustivas:
+
+- Cookies `cf_clearance` da Cloudflare são bound a `(IP + TLS fingerprint + UA)` do Chrome originador. Extrair cookie e usar em outro client HTTP (httpx, urllib, curl) **sempre retorna 403**, mesmo com IP idêntico, UA exato e cookies frescos. Testado IPv4 e IPv6. Validado em 2 sessões independentes da odin (manhã e tarde de 2026-05-15).
+- Tentativa de `Playwright.connect_over_cdp` no Chrome do danewell + `page.goto` disparou Splash Screen imediato (Cloudflare detecta `__playwright__binding__` no window, mesmo via CDP).
+- **Descoberta crítica adicional**: o TLS fingerprint do Chrome 148 desktop Linux x86_64 está bloqueado pela Cloudflare especificamente em `/danae-webapi/*` (e talvez todo `/api/*`). Mesmo com profile recriado, Chrome do pool retorna 403 nesse path. Brave 148 (mesmo Chromium 148, TLS fingerprint diferente + `navigator.brave` exposto) **passa**.
+
+**Decisão:** Arquitetura final D.1 em 3 camadas:
+
+1. **Brave 148 no danewell** (Xvfb :101, CDP 9224 loopback-only, profile aquecido) — único browser que passa Cloudflare em `/danae-webapi/*`
+2. **Renewer no danewell** (`http://192.168.1.5:8081/danae/live`) — endpoint HTTP que faz `fetch()` à Danae API DENTRO do Brave via CDP raw (não Playwright). Retorna JSON normalizado. Latência ~5s.
+3. **Bridge na odin** (`/events/live`) — proxy HTTP simples ao endpoint do danewell + filtro de esports/virtuais via heurística (`zone_name in {Esoccer, Virtuais, Cyber}` ou `league_name` contém "minutos de jogo"/"esports"/"H2H GG"/"GT Leagues"). Latência ~6s end-to-end.
+
+Chrome 148 do pool **continua ativo** no danewell (Xvfb :100, CDP 9223 LAN-exposed) pra coleta de mercados via Playwright/CDP — esse fluxo (`/quote`, `/markets` no bridge) não passa por `/danae-webapi/*` e não é afetado pelo bloqueio.
+
+**Alternativas consideradas e descartadas:**
+- httpx direto da odin com cookies extraídos — cookies bound, 403 garantido
+- Bridge da odin connect_over_cdp ao Chrome do danewell via Playwright — bindings detectáveis
+- Renovar TLS fingerprint via `curl_cffi` / `noble-tls` — não-trivial, frágil
+- VPN/proxy datacenter — Cloudflare bloqueia ranges conhecidos
+- Trocar UA do Chrome 148 pra UA Firefox — mismatch UA vs TLS, ainda flag
+
+**Trade-offs:**
+- ✅ Latência aceitável (~6s pra 100+ eventos)
+- ✅ Zero Chrome dependency na odin pra D.1 (pra D.0 mantém)
+- ✅ Sem refresh manual de cookies (Brave do pool mantém vivo + renewer cobre)
+- ✅ Self-healing (Cloudflare desafia → Brave passa → fluxo continua)
+- ❌ Acoplamento com danewell (1 nó SPOF pra D.1) — futura: 2º Brave numa segunda máquina
+- ❌ Brave também pode ser bloqueado no futuro — fallback Firefox documentado em BRIEFING-ODIN-2026-05-15.md
+- ❌ `name: null` em todos eventos no normalize do danewell (bug ativo, fix em andamento)
+
+**Status:** ATIVA. Bridge `/events/live` deployed em commit pendente. Aguardando fix do `name` no normalizer do danewell.
+
+---
+
 ## 2026-05-15 (sessão 3) — D.1 vai usar API HTTP nativa, não DOM scrape
 
 **Contexto:** Plano original da Fase D.1 (descoberta automática de eventos) era usar Playwright via bridge pra abrir listagens (`/live/`, `/sport/futebol/`) e parsear DOM/links. Investigação via mitmproxy (capturado no PC do daniel, não-flagueado) descobriu que a Betano expõe `/danae-webapi/api/live/overview/latest` — JSON estruturado com 301 eventos ao vivo, schemas completos de leagues/zones/sports, auth só via cookie `_cfuvid`.

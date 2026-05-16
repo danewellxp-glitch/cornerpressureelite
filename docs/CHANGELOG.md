@@ -17,6 +17,45 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-15→16 (sessão 4) — D.1 funcional end-to-end via danewell renewer
+
+**Contexto:** Sessão 3 deixou plano de implementar D.1 com httpx + cookies extraídos do .mitm. Sessão 4 começou implementando isso e bateu em sucessivos blockers até descobrir a arquitetura final.
+
+**O que foi descoberto (na ordem):**
+1. **Cookies não transportam** — extrair `cf_clearance` e usar em httpx/curl/urllib externos sempre dá 403. Validado IPv4 e IPv6, com UA exato. Cloudflare amarra cookie a IP+TLS+UA do Chrome originador.
+2. **Playwright via CDP no pool dispara Splash** — `__playwright__binding__` detectável.
+3. **Chrome 148 desktop Linux x86_64 está bloqueado** especificamente em `/danae-webapi/*` da Betano, **independente de profile/cookies**. Profile recriado, flags stealth, tudo — Chrome retorna 403 Splash. SPA da Betano em `/live/` aberta nesse Chrome fica em loading vazio porque o JS dela próprio recebe 403.
+4. **Brave 1.90.122 (Chromium 148) passa** — TLS fingerprint diferente + `navigator.brave` exposto. Cloudflare aceita.
+
+**O que foi feito:**
+- **No danewell** (Claude lá): instalou Brave + xvfb-display101.service + brave-betano.service. Estendeu cookie-renewer com endpoint `GET /danae/live` que faz `fetch()` à Danae API DENTRO do Brave via CDP raw (sem Playwright). Suporta `?sport=` e `?include_virtuals=` e `?browser=brave|chrome` (default brave).
+- **Bug fix** no normalize: `name` retornava null porque Danae não tem campo `name` — derivado de `participants[]`. Corrigido em pouco tempo (sessão paralela). Fill rate agora 100%.
+- **Na odin**: implementado `GET /events/live` no `cpes-bridge/server.py` como proxy ao danewell renewer + filtro de esports/virtuais via heurística (`zone_name in {Esoccer, Virtuais, Cyber}` ou `league_name` contém "minutos de jogo"/"esports"/"H2H GG"/"GT Leagues"). Default filtra virtuais; `?include_virtuals=true` mantém.
+
+**Validação E2E final:**
+- 18 eventos reais retornados (35 raw, 17 virtuais filtrados)
+- Latência ~6s end-to-end
+- Eventos com names completos: "Universitario de Deportes vs Atletico Grau" (Liga 1 Peru, 154 mercados), "Coquimbo Unido vs Audax Italiano" (Liga de Primera Chile, 154 mercados), etc.
+
+**Bugs encontrados:** [Cookies cf_clearance bound a IP+TLS+UA](BUGS.md#2026-05-15--cookies-cf_clearance-bound-a-iptlsua-do-chrome-originador)
+
+**Decisões:** [D.1 final: bridge proxy ao danewell renewer](DECISIONS.md#2026-05-15-sessão-4--d1-final-bridge-proxy-ao-danewell-renewer)
+
+**Estado final:**
+- ✅ `/events/live` no bridge da odin retornando dados reais
+- ✅ Filtro de virtuais (esports/Esoccer) funciona — `?include_virtuals=true` desliga
+- ✅ Brave pool no danewell estável (Xvfb :101, profile aquecido, CDP loopback :9224)
+- ✅ Chrome pool do danewell intacto pra Playwright/CDP via porta 9223 (markets/odds)
+- ✅ Documentação completa em `docs/architecture/betano-danae-api.md`
+- ⏳ `cpes-main` ainda não consome `/events/live` — próxima sessão integra (Fase D.2)
+
+**Próximos passos:**
+- Fase D.2: cpes-main faz polling em `/events/live`, fuzzy match contra fixtures API-Football
+- Considerar endpoint adicional `/danae/event/<id>` no danewell pra consultar mercados de 1 jogo via Brave (alternativa eventual ao `/markets` atual via Chrome)
+- Plano-B documentado em `BRIEFING-ODIN-2026-05-15.md` se Brave também for bloqueado (UA override → Firefox pool → curl_cffi → proxy residencial)
+
+---
+
 ## 2026-05-15 (sessão 3) — D.1 investigação: descoberta da Danae API + IP flagueado
 
 **Contexto:** Investigação técnica da Fase D.1 (descoberta automática de eventos da Betano). Plano original: Playwright via bridge abrindo `/live/` e parseando DOM. Resultado: descoberta de API HTTP nativa muito superior, mas IP residencial flagueado no processo.
