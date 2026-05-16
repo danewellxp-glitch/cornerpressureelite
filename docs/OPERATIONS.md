@@ -164,3 +164,40 @@ asyncio.run(main())
 ```
 
 Se `elapsed < 50` e corners < 7, aguardar — capturas escalam pra 50+ automaticamente quando entrar em `na_janela`. Detalhes em [`BUGS.md`](BUGS.md#2026-05-16--falso-bug-discovery-sem-capturas-iniciais-é-normal).
+
+## tests/ não monta no container `cpes-api` / `cpes-main` (Fase E.1)
+
+**Sintoma:** `docker exec cpes-api ls /app/tests` → "No such file or directory".
+Tentativas de rodar `pytest` dentro do container falham.
+
+**Causa:** `corner-pressure-elite/.dockerignore` (linha `tests`) **exclui o
+diretório do build context**. O `COPY . .` do Dockerfile não copia tests, e
+docker-compose.yml **não tem bind mount** pra tests/.
+
+**Por que está assim:** decisão consciente — imagem prod fica menor (sem
+suite de testes). Mas atrapalha debugging on-host pelo container.
+
+**Workaround pra dev/debug** (não comitar — só local):
+
+```bash
+# Opção A: copiar pontual via docker cp (sumirá no próximo rebuild)
+docker cp corner-pressure-elite/tests cpes-api:/app/tests
+docker exec cpes-api python -m pytest /app/tests/test_public_ticker.py
+
+# Opção B: adicionar bind volume só no override local
+cat > docker-compose.override.yml <<'YAML'
+services:
+  api:
+    volumes:
+      - ./corner-pressure-elite/tests:/app/tests:ro
+  main:
+    volumes:
+      - ./corner-pressure-elite/tests:/app/tests:ro
+YAML
+docker compose up -d --force-recreate api main
+```
+
+**Recomendação canônica:** rodar pytest **no host** (não no container).
+`python3 -m pytest corner-pressure-elite/tests/` funciona porque toda
+dependência do CPES já está instalada globalmente no odin (`python3 -c
+"import asyncpg, fastapi" → ok`).

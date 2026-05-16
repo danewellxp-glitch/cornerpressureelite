@@ -147,41 +147,31 @@ def _delta_or_none(
     minutes: int,
     attr: str,
 ) -> Optional[int]:
-    """Acha snapshot mais antigo dentro da janela [now-Nmin, now] e retorna delta.
+    """Delta da métrica `attr` entre o snapshot mais antigo dentro da janela
+    `[now - Nmin, now]` e o `latest`.
 
-    Se o snapshot mais antigo DO DEQUE tem `captured_at > now - Nmin`, significa
-    que o deque inteiro está dentro da janela — usamos o oldest do deque como
-    base. Se o deque mais antigo é mais velho que `now - Nmin`, achamos o
-    primeiro snapshot dentro da janela.
+    Política: SEMPRE prefere o snapshot mais antigo **dentro** da janela como
+    base. Snapshots ANTES do cutoff são ignorados (eles representam um período
+    fora da janela e contariam mudanças que não pertencem aos "últimos N min").
 
-    Quando nenhuma base de comparação existe (deque vazio ou só `latest`),
-    retorna `None`. Quando delta seria negativo (corners "decresceu" por reset
-    ou bug), retorna `0`.
+    Retorna `None` quando não há base de comparação dentro da janela (só o
+    `latest` está dentro, ou o snapshot referência foi evictado por maxlen).
+    Retorna `0` quando delta seria negativo (defesa contra reset/bug — janela
+    nunca é negativa).
+
+    Aceito-trade-off: se a cobertura temporal do deque é menor que `minutes`,
+    a janela retorna o delta do intervalo que realmente cobrimos (subestima
+    em vez de superestimar). Documentado em `betano-stats-api.md §5.2`.
     """
     cutoff = now - timedelta(minutes=minutes)
-    # Procura o snapshot mais antigo que ainda está dentro da janela [cutoff, now].
-    # Se TODOS os snapshots são mais velhos que cutoff (ou seja, o jogo já
-    # acumulou stats antes da janela começar), usar o snapshot logo ANTES
-    # da janela seria correto pra "delta dentro da janela". Mas se o oldest
-    # do deque já está fora, possivelmente foi evictado — devolve None pra
-    # ser explícito.
-    base_inside_window: Optional[_Snapshot] = None
-    base_just_before: Optional[_Snapshot] = None
+    base: Optional[_Snapshot] = None
     for snap in dq:
         if snap.captured_at >= cutoff:
-            base_inside_window = snap
+            base = snap
             break
-        base_just_before = snap
 
-    if base_just_before is not None:
-        # Tem snapshot fora da janela → usamos ele como referência do "antes".
-        # Delta = corners(latest) - corners(just_before).
-        base = base_just_before
-    elif base_inside_window is not None and base_inside_window is not latest:
-        # Todo o deque está dentro da janela; usa o mais antigo dela.
-        base = base_inside_window
-    else:
-        # Só temos `latest` dentro da janela e nada antes → sem base.
+    if base is None or base is latest:
+        # Só `latest` dentro da janela (ou nenhum) → sem base.
         return None
 
     delta = getattr(latest, attr) - getattr(base, attr)
