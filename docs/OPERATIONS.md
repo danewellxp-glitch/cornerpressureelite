@@ -138,3 +138,29 @@ Com systemd ativo (após 2026-05-15), o stack do bridge sobe sozinho no boot. Va
 5. Se algum service falhou: `journalctl --user -u <service> -n 50 --no-pager` pra diagnosticar.
 
 Se systemd não subiu (extremamente raro): seguir "Subir bridge manualmente (fallback de emergência)" acima.
+
+## Troubleshooting comum
+
+**"Fixture descoberto via D.2 mas com poucas capturas em `odds_history`"**
+
+Provavelmente está em `pre_janela` (minuto < 50 E corners < 7). Não é bug — `adaptive_polling` decide não gastar requisição nessa fase. Validar:
+
+```bash
+# Checar minuto atual do fixture
+docker exec cpes-main python -c "
+import asyncio
+from data.api_client import APIFootballClient
+from utils.rate_limiter import RateLimiter
+from config import API_FOOTBALL_KEY, API_DAILY_LIMIT, LIGAS_MONITORADAS
+async def main():
+    rl = RateLimiter(max_requests_per_day=API_DAILY_LIMIT, max_requests_per_minute=30)
+    client = APIFootballClient(API_FOOTBALL_KEY, rl)
+    live = await client.get_live_fixtures([l['id'] for l in LIGAS_MONITORADAS])
+    for f in live:
+        if f['fixture']['id'] in {<FIXTURE_IDS>}:
+            print(f\"{f['fixture']['id']} | {f['fixture']['status']['short']} elapsed={f['fixture']['status'].get('elapsed')}min\")
+asyncio.run(main())
+"
+```
+
+Se `elapsed < 50` e corners < 7, aguardar — capturas escalam pra 50+ automaticamente quando entrar em `na_janela`. Detalhes em [`BUGS.md`](BUGS.md#2026-05-16--falso-bug-discovery-sem-capturas-iniciais-é-normal).

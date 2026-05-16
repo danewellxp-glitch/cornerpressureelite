@@ -124,3 +124,26 @@ Checklist defensivo consolidado em [`docs/architecture/playwright-anti-bot-check
 **Fix:** 3 systemd user units encadeadas (`xvfb-bridge.service` → `chrome-bridge.service` → `cpes-bridge.service`) com `Restart=always` e `Requires/After`. `loginctl enable-linger daniel` pra services sobreviverem a logoff e subirem no boot. Units versionadas em `~/cpes-bridge/systemd/`. Cenário A (kill bridge → auto-restart em <14s) validado; Cenário B (reboot real) pendente. Ver `OPERATIONS.md` seção "Stack systemd".
 
 **Lição:** Toda dependência crítica precisa ser systemd-managed. `nohup` é gambiarra pra dev, não pra produção. **Detalhe importante:** `Restart=on-failure` NÃO restarta em SIGTERM (kill manual considerado "graceful"). Pra resiliência real contra kill externo, usar `Restart=always`.
+
+---
+
+## 2026-05-16 — [FALSO-BUG] Discovery sem capturas iniciais é normal
+
+**Sintoma:** Fixtures descobertos via D.2 BetanoFixtureDiscovery aparecem em `betano_fixture_map` com `confidence=1.00`, mas `odds_history` mostra só **1-3 capturas em burst único** logo após o match e depois zero. Comparado com fixtures antigos no mesmo intervalo (50-79 capturas), parece bug grave.
+
+**Causa raiz:** **Não é bug.** Comportamento por design do `adaptive_polling`. Os fixtures novos descobertos estavam no **minuto 26 do 1T** — fase `pre_janela` (min < 50 E corners < 7, ver `main.py:692-693` e `config.py:19,27`). Nessa fase o polling adaptativo decide não gastar requisição. As 1-3 capturas iniciais foram burst do primeiro ciclo logo após o discovery popular o mapa, antes do `adaptive_polling` reconhecer a fase. Fixtures antigos com 50+ capturas já estavam em `na_janela` (min 50+) ou no fim do jogo.
+
+**Fix:** Nenhum. Sistema funcionando como projetado. Capturas escalam automaticamente quando fixture entra em `na_janela` (min ≥ 50 OU corners ≥ 7).
+
+**Sinais que confirmam comportamento correto:**
+- `_main_loop` loga `[DEBUG LIVE] X live → Y fixtures` continuamente
+- `betano_discovery` continua casando event_ids em ciclos (a cada ~2-3min)
+- `betano_fixture_map` tem o mapeamento gravado com `resolved_via=discovery_team_id_lookup`
+- Bridge silencioso pros novos = `adaptive_polling` decidiu não chamar (não é erro, é decisão)
+
+**Como validar (próxima vez que aparentar o mesmo "sintoma"):**
+1. Checar minuto do jogo via API-Football (ver `OPERATIONS.md` → "Listar jogos elegíveis pra smoke")
+2. Se minuto < 50 e corners < 7 → comportamento correto, aguardar
+3. Quando fixture cruzar pra `na_janela`, capturas escalam pra 50+ automaticamente
+
+**Lição:** Comparar "fixture novo (min 26)" com "fixture antigo (min 75)" no mesmo snapshot de `odds_history` é falsa equivalência — cada fixture passa por `pre → na → pos` sequencialmente. Antes de declarar bug em pipeline com polling adaptativo, sempre **checar a fase atual** do fixture, não só contar linhas no DB.
