@@ -28,6 +28,8 @@ Sec-Fetch-Site: same-origin
 
 Auth: **só `_cfuvid`** (Cloudflare bypass). Sem Bearer, sem CSRF. Mesma estratégia do `/overview/latest`.
 
+> **⚠️ Gotcha (descoberto na implementação E.1, 2026-05-16):** este endpoint exige também `X-Operator: 8` + `X-Language: 5`. **Sem esses headers a Betano responde HTTP 200 silencioso** com `{"result":1,"version":0,"versionsPerAudience":{}}` (~49 bytes) — parece sucesso mas não traz dados. A captura mitm do PC do daniel (Firefox real) não mostrou esses headers porque a SPA da Betano os injeta via interceptor JS; só dá pra ver via `Network.enable` no DevTools enquanto a SPA abre `/live/<slug>/<event_id>/`. O renewer (`~/cookie-renewer/server.py`) já manda esses headers desde Fase E.1 PARTE A.
+
 ### 1.1 Schema top-level
 
 ```json
