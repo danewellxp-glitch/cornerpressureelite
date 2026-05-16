@@ -294,3 +294,22 @@ ODDS_CAPTURE_CYCLE_GOALS_SEC = int(os.getenv("ODDS_CAPTURE_CYCLE_GOALS_SEC", "36
 ODDS_CAPTURE_MIN_MINUTE_CORNERS = int(os.getenv("ODDS_CAPTURE_MIN_MINUTE_CORNERS", "15"))
 ODDS_CAPTURE_MIN_MINUTE_CARDS = int(os.getenv("ODDS_CAPTURE_MIN_MINUTE_CARDS", "10"))
 ODDS_CAPTURE_MIN_MINUTE_GOALS = int(os.getenv("ODDS_CAPTURE_MIN_MINUTE_GOALS", "5"))
+
+
+# ============================================================
+# Stats Betano via bridge (Fase E.1)
+# ============================================================
+# BridgeStatsAdapter consome `/event/<id>/state` no bridge — reusa pipeline
+# D.1 (Brave + danewell renewer + cookie `_cfuvid` aquecido). Stats Betano
+# substitui API-Football pra eliminar dependência do crédito AF.
+# WIRING: PARTE F' (factory.py) ainda não plugou — flag é a guarda.
+USE_BETANO_STATS = os.getenv("USE_BETANO_STATS", "false").lower() == "true"
+# Intervalo base entre polls do mesmo fixture (worker pode ser adaptive).
+STATS_POLL_INTERVAL_SEC = int(os.getenv("STATS_POLL_INTERVAL_SEC", "15"))
+# Maxlen do deque interno do StatsWindowCalculator por fixture. 120 snapshots
+# a STATS_POLL_INTERVAL_SEC=15s = 30 min de janela em memória — suficiente
+# pras janelas 5/10min com folga.
+STATS_WINDOW_HISTORY_SIZE = int(os.getenv("STATS_WINDOW_HISTORY_SIZE", "120"))
+# Quanto buscar do stats_history no bootstrap do worker (restart). Default
+# 20 min cobre comfortably as janelas de 10min.
+STATS_BOOTSTRAP_LOOKBACK_MIN = int(os.getenv("STATS_BOOTSTRAP_LOOKBACK_MIN", "20"))
