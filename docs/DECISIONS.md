@@ -103,6 +103,36 @@ Chrome 148 do pool **continua ativo** no danewell (Xvfb :100, CDP 9223 LAN-expos
 
 ---
 
+## 2026-05-16 (sessão 5) — Fase D.2: descoberta automática de fixtures Betano
+
+**Contexto:** Após D.1 funcional (bridge `/events/live` retornando eventos estruturados), próxima fase é eliminar o `BETANO_EVENT_MAP` manual — popular `betano_fixture_map` automaticamente fazendo match entre eventos Betano e fixtures API-Football das ligas monitoradas.
+
+**Decisão:** 4 componentes novos, faseados em 4 partes (B, C, D, E):
+
+- **B. Nova tabela `betano_team_map`** (migration 0004) — mapping Betano team_id ↔ API-Football team_id, com `match_method` ('static_catalog'|'fuzzy'|'manual'), `match_confidence` (0-1), índice `gin_trgm_ops` pra similarity search SQL-side.
+- **C. `FixtureMatcher`** (data/discovery/) — stateless de IO, recebe `betano_event` + `candidate_fixtures` (lista API-Football). Tenta lookup determinístico via team_id; se algum team não mapeado, faz fuzzy fallback com `rapidfuzz.fuzz.ratio` em nomes normalizados (lowercase, sem acentos, sem FC/SC/CF/(F)/(M)/etc), valida kickoff ±30min, threshold 0.85. Match fuzzy bem-sucedido UPSERTa teams resolvidos no map.
+- **D. `BetanoFixtureDiscovery` worker** — asyncio.Task, poll bridge `/events/live?sport=FOOT` a cada 150s (configurável), reusa `get_today_schedule` via cache diário, chama matcher por evento, UPSERT em `fixture_map` com `resolved_via='discovery_team_id_lookup'` ou `'discovery_fuzzy'`. Fail-soft em 3 níveis (bridge down → skip ciclo, matcher except → skip evento, upsert except → skip fixture).
+- **E. `BETANO_EVENT_MAP` vira override opcional** — log explicitando 3 cenários (override manual, descoberta automática, ou warning se ambos desligados).
+
+**Alternativas consideradas:**
+- Receber `api_client` no matcher — descartado, prefere caller injetar fixtures pra facilitar testes
+- Matcher fazer fuzzy database-side (pg_trgm) — viável mas menos flexível pra signal de scoring; rapidfuzz Python-side com normalização customizada é mais rico
+- Refresh do catálogo `/teams` no worker (PARTE A) — ADIADO até bridge ganhar endpoint `/teams` que depende do danewell adicionar `/danae/teams` no renewer
+- Worker em thread separada vs asyncio.Task — Task é consistente com `OddsPersistenceWorker`
+
+**Trade-offs:**
+- ✅ Eliminação progressiva do `BETANO_EVENT_MAP` (fica como override DEV/manual)
+- ✅ Self-healing: matches fuzzy alimentam o team_map → próximos lookups viram determinísticos (`confidence=1.0`)
+- ✅ Worker isolado (Task) — não interfere com `_main_loop` nem outros workers
+- ✅ 0 requests adicionais à API-Football (reusa `get_today_schedule` cacheado)
+- ✅ 24 testes novos (7 repo + 10 matcher + 6 worker + 1 verde geral)
+- ❌ Sem PARTE A (`/teams` no bridge), catálogo Betano não é populado proativamente — só matches on-demand criam entries
+- ❌ Validação E2E ainda sem overlap real (jogos noturnos atuais são fora das ligas monitoradas — esperado, não bug)
+
+**Status:** ATIVA. Worker rodando em produção desde 2026-05-16 ~02h UTC. PARTE A pendente pra próxima sessão.
+
+---
+
 ## 2026-05-15 (sessão 4 — extensão proxy) — Isolamento de egress por browser pool
 
 **Contexto:** Após D.1 funcional, comprado proxy residencial brasileiro (ML Telecom RJ, `200.234.172.57:43958`) pra diversificar IP de saída do Brave (que atende Danae API). IP da casa (V tal Curitiba, `200.181.212.29`) é único hoje pra tudo — se Cloudflare reflagar, perde tudo junto.

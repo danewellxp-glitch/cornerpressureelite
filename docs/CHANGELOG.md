@@ -17,6 +17,52 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-16 (sessão 5) — Fase D.2: discovery worker no cpes-main
+
+**Contexto:** D.1 entregou o bridge `/events/live`. D.2 era automatizar a população do `betano_fixture_map` via matching com fixtures API-Football das ligas monitoradas, eliminando o `BETANO_EVENT_MAP` manual.
+
+**O que foi feito (4 partes faseadas):**
+
+- **PARTE B** — migration `0004_betano_team_map.sql` (tabela + 3 índices, incl. GIN trgm) + `BetanoTeamMapRepo` com 4 métodos (`get_by_betano_id`, `get_by_api_football_id`, `bulk_upsert` via executemany, `find_by_fuzzy_name` via pg_trgm similarity). Adicionado `rapidfuzz>=3.6.0` ao requirements. 7 testes verdes.
+- **PARTE C** — `data/discovery/fixture_matcher.py` com classe `FixtureMatcher` (lookup determinístico + fuzzy fallback com rapidfuzz, normalização de nomes — lowercase, sem acentos, sem FC/SC/(F)/(M)/(esports), validação kickoff ±30min). Match fuzzy bem-sucedido auto-UPSERTa teams no map. 10 testes verdes. **Bug fix durante testes:** regex `\b(...)\b` não funciona com parens — splittei em 2 patterns (paren-tokens sem boundary, word-tokens com).
+- **PARTE D** — `workers/betano_discovery.py` com `BetanoFixtureDiscovery` worker (asyncio.Task, poll 150s default, fail-soft em 3 níveis, cache schedule por dia). Wiring em `main.py` iniciar() (dentro do `if USE_BETANO_BRIDGE:`) + `_shutdown()`. 3 configs novas em `config.py`. 6 testes verdes (incluindo `test_worker_continues_when_upsert_fails`).
+- **PARTE E** — `BETANO_EVENT_MAP` segue funcionando como override manual; log no startup discrimina 3 cenários (override / discovery automática / warning sem fonte).
+
+**PARTE A adiada** (bridge `/teams` endpoint) — depende de `/danae/teams` no renewer do danewell. Sem catálogo periódico, `betano_team_map` cresce on-demand via matches fuzzy.
+
+**Validação:**
+- 24 testes novos verdes (7 + 10 + 6 + 1 sanity)
+- 38 testes verdes em arquivos relacionados (sem regressão em `test_main_pipeline_integration`)
+- `python -c "import main"` passa
+- Suite full tem 23 failures pré-existentes (backtest, strategy_preference, whatsapp formatter, providers/betano integration) — nenhum nos arquivos novos
+- Migration 0004 aplicada via `Database.init()` automático no startup (idempotente)
+
+**Smoke E2E:**
+- Worker iniciado com log: `"BetanoFixtureDiscovery iniciado (poll=150s, sport=FOOT, ligas=10)"`
+- Ciclo 1: `schedule_atualizado: 27 fixtures candidatos (date=2026-05-16, ligas=10)`, depois `17 eventos, 0 matches, 17 skipped`
+- Comportamento correto: bridge retorna eventos sul-americanos/USA (Liga 1 Peru, Liga de Primera Chile, NWSL EUA, etc) que não estão nas 10 ligas API-Football monitoradas (Premier/Bundesliga/Serie A/La Liga/Argentina/Brasil/etc). Discovery vai disparar matches quando jogos das ligas monitoradas estiverem ao vivo.
+
+**Bugs encontrados nesta sessão:** Nenhum bug runtime — o `name: null` da sessão anterior já estava fixado pelo danewell antes da D.2 começar.
+
+**Decisões:** [Fase D.2: descoberta automática de fixtures Betano](DECISIONS.md#2026-05-16-sessão-5--fase-d2-descoberta-automática-de-fixtures-betano)
+
+**Achado operacional:** `docker-compose.yml` define `environment: USE_BETANO_BRIDGE=${USE_BETANO_BRIDGE:-false}` que tem **precedência sobre `env_file`** — pra ativar bridge precisa exportar no shell OU criar `.env` na raiz do repo (docker-compose lê automático). `.env` raiz criado nesta sessão com `USE_BETANO_BRIDGE=true`.
+
+**Estado final:**
+- ✅ Worker rodando em produção (cpes-main container, há ~3min ao escrever isso)
+- ✅ Migration 0004 aplicada
+- ✅ `betano_team_map` schema criado, populando on-demand
+- ✅ `betano_fixture_map` ainda com 5 entries `manual_seed` legadas — `discovery_*` vai aparecer quando overlap
+- ⏳ PARTE A (`/teams` endpoint) pendente pra próxima sessão
+- ⏳ Validação E2E com matches reais pendente jogo de liga monitorada ao vivo
+
+**Próximos passos:**
+- PARTE A: prompt pro Claude do danewell adicionar `/danae/teams` → bridge ganha `/teams` proxy → worker chama 1×/dia pra popular catálogo
+- Observar produção 24h: confirmar matches reais aparecendo quando ligas monitoradas têm jogos
+- Eventualmente decommissionar `BETANO_EVENT_MAP` (quando confiança no discovery for alta)
+
+---
+
 ## 2026-05-15 (sessão 4 — extensão proxy) — Proxy residencial no Brave
 
 **Contexto:** Pós-D.1 funcional. Daniel comprou proxy residencial brasileiro (ML Telecom RJ, `200.234.172.57:43958`) pra diversificar IP de saída do pool Brave. Risco a mitigar: Cloudflare reflagar IP único da casa (V tal Curitiba) cortaria tudo de uma vez.
