@@ -53,7 +53,19 @@ async def build_providers(
 
     use_bridge = bool(getattr(settings, "USE_BETANO_BRIDGE", False))
     use_new = bool(getattr(settings, "USE_NEW_PROVIDERS", False))
+    use_betano_stats = bool(getattr(settings, "USE_BETANO_STATS", False))
     drift = bool(getattr(settings, "DRIFT_CHECK_PROVIDERS", False))
+
+    # Foot-gun pré-PARTE F': USE_NEW_PROVIDERS=true sem caminho bridge
+    # degrada stats pra AF-only. Em produção atual a chave AF tá vencida,
+    # então sem Betano stats = pipeline cego. Avisa alto.
+    if use_new and not (use_bridge and use_betano_stats):
+        log.warning(
+            "providers.foot_gun USE_NEW_PROVIDERS=true sem (USE_BETANO_BRIDGE+USE_BETANO_STATS) "
+            "→ stats degradado pra apifootball-only. Se a chave AF está vencida/sem cota, "
+            "score_engine vai operar sem dados frescos. Ativar BridgeStatsAdapter (PARTE F') "
+            "ou setar USE_BETANO_BRIDGE=true + USE_BETANO_STATS=true antes do deploy."
+        )
 
     if use_bridge:
         if use_new:
@@ -107,15 +119,19 @@ async def build_providers(
             _noop_shutdown,
         )
 
-    # ----- Stack nova: Betano primary + AF fallback -----
+    # ----- Stack nova: Betano odds primary + AF stats fallback -----
+    # NOTA Fase E.1: o `BetanoStatsProvider` (Opta REST direto) foi removido
+    # nessa fase porque a Betano passou a bloquear o endpoint Opta com 403 CF
+    # sem warmup. Stats Betano agora vêm pelo bridge (`BridgeStatsAdapter`),
+    # wirado quando USE_BETANO_BRIDGE=true + USE_BETANO_STATS=true (PARTE F').
+    # Enquanto esse caminho está vivo (USE_NEW_PROVIDERS=true sem bridge),
+    # odds continua vindo do Betano session direto e stats degrada pra AF only.
     from .betano import (
         BetanoCatalog,
         BetanoMarkets,
         BetanoSession,
-        BetanoStatsStream,
     )
     from .betano.odds_adapter import BetanoOddsProvider
-    from .betano.stats_adapter import BetanoStatsProvider
 
     cookies_path = Path(getattr(settings, "BETANO_COOKIES_PATH", "config/betano_cookies.json"))
     proxies_csv = getattr(settings, "WEBSHARE_PROXIES", "") or ""
@@ -132,7 +148,6 @@ async def build_providers(
         )
         session = BetanoSession(cookies={}, proxies=proxies)
 
-    stream = BetanoStatsStream(session)
     markets = BetanoMarkets(session)
     catalog = BetanoCatalog(session)
 
@@ -145,28 +160,19 @@ async def build_providers(
         min_score=min_score,
         fixture_repo=fixture_repo,
     )
-    bet_stats = BetanoStatsProvider(
-        session=session,
-        stream=stream,
-        catalog=catalog,
-        fixture_repo=fixture_repo,
-    )
 
     composite_odds = CompositeOddsProvider(
         [bet_odds, af_odds],
         drift_check=drift,
         persistence_worker=odds_persistence_worker,
     )
-    composite_stats = CompositeStatsProvider(
-        [bet_stats, af_stats],
-        drift_check=drift,
-    )
+    composite_stats = CompositeStatsProvider([af_stats], drift_check=drift)
 
     async def shutdown() -> None:
         await session.close()
 
     log.info(
-        "providers.new_stack primary=betano fallback=apifootball drift=%s min_score=%d",
+        "providers.new_stack primary_odds=betano stats=apifootball-only drift=%s min_score=%d",
         drift, min_score,
     )
     # garante que callers possam aguardar mesmo se shutdown for não-async no futuro

@@ -54,6 +54,13 @@ async def test_factory_returns_legacy_stack_when_flag_off():
 
 @pytest.mark.asyncio
 async def test_factory_returns_new_stack_when_flag_on(tmp_path):
+    """Stack nova (sem bridge): Betano odds + AF odds, stats AF only.
+
+    Pós Fase E.1: `BetanoStatsProvider` (Opta REST) foi removido — bloqueado
+    por 403 CF sem warmup. Stats Betano agora só via `BridgeStatsAdapter`
+    (caminho USE_BETANO_BRIDGE+USE_BETANO_STATS, exercitado em outro teste
+    quando PARTE F' wirear o adapter no factory).
+    """
     cookies = tmp_path / "cookies.json"
     cookies.write_text('{"cookies": {"cf_clearance": "x"}, "kbversion": "3.41.0"}')
     settings = _settings(
@@ -67,6 +74,9 @@ async def test_factory_returns_new_stack_when_flag_on(tmp_path):
         names = [p.name for p in odds._providers]  # type: ignore[attr-defined]
         assert names == ["betano", "apifootball"]
         assert odds._drift_check is True  # type: ignore[attr-defined]
+        # Stats: degradação pra AF only enquanto BridgeStatsAdapter não está wirado.
+        assert len(stats._providers) == 1  # type: ignore[attr-defined]
+        assert stats._providers[0].name == "apifootball"  # type: ignore[attr-defined]
     finally:
         await shutdown()
 

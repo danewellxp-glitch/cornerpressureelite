@@ -17,8 +17,34 @@ log = logging.getLogger("cpes.providers.stats")
 
 @dataclass(frozen=True)
 class CanonicalStats:
+    """Snapshot canônico de stats de 1 fixture, agregado por StatsProvider.
+
+    **Campos GARANTIDOS** (todo provider sempre preenche; nunca None):
+        fixture_id, source, minute, score_home/away, corners_home/away,
+        yellow_cards_home/away, red_cards_home/away, shots_on_target_home/away,
+        dangerous_attacks_home/away, possession_home/away, x_goals_home/away.
+
+        Quando a fonte não cobre uma métrica, o adapter preenche `0`/`0.0`
+        (conforme `score_engine` e `cards_score_engine` já lidam com zero).
+
+    **Campos OPCIONAIS** (None quando o provider/fase não preenche):
+        - `provider_pressure`: Opta momentum (Fase A — só StatsStream Opta).
+        - `version`: versão do snapshot Betano (`BridgeStatsAdapter` Fase E.1).
+          AF e Fase A deixam None.
+        - `second_since_start`: clock granular em segundos (Betano `/latest`).
+          AF expõe só minuto → deixa None.
+        - `corners_last_5min`/`_10min`, `yellow_last_5min`/`_10min`:
+          janelas calculadas **a posteriori** por `StatsWindowCalculator`
+          (PARTE E') a partir do histórico em `stats_history`. Snapshot recém-saído
+          do adapter sempre vem com essas 4 keys = None — checar via
+          `has_window_stats` antes de assumir presença.
+
+    Downstream que precisa dos campos opcionais deve fazer `if x is None`
+    checagem explícita ou usar a property `has_window_stats`.
+    """
+
     fixture_id: int
-    source: str                 # "betano" | "apifootball"
+    source: str                 # "betano" | "apifootball" | "bridge_betano"
     minute: int
     score_home: int
     score_away: int
@@ -36,8 +62,25 @@ class CanonicalStats:
     possession_away: int
     x_goals_home: float
     x_goals_away: float
-    provider_pressure: Optional[float] = None  # Opta momentum
+    provider_pressure: Optional[float] = None  # Opta momentum (Fase A)
     raw: dict = field(default_factory=dict)
+    # ----- Campos Fase E.1 — opcionais -----
+    version: Optional[int] = None
+    second_since_start: Optional[int] = None
+    corners_last_5min: Optional[int] = None
+    corners_last_10min: Optional[int] = None
+    yellow_last_5min: Optional[int] = None
+    yellow_last_10min: Optional[int] = None
+
+    @property
+    def has_window_stats(self) -> bool:
+        """True se as 4 janelas (corners/yellow × 5/10min) estão preenchidas."""
+        return (
+            self.corners_last_5min is not None
+            and self.corners_last_10min is not None
+            and self.yellow_last_5min is not None
+            and self.yellow_last_10min is not None
+        )
 
 
 @runtime_checkable
