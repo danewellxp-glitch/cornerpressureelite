@@ -238,6 +238,15 @@ BETANO_BRIDGE_CAPTURE_SEC = float(os.getenv("BETANO_BRIDGE_CAPTURE_SEC", "5.0"))
 BETANO_BRIDGE_PREFERRED_ODD_MIN = float(os.getenv("BETANO_BRIDGE_PREFERRED_ODD_MIN", "1.50"))
 BETANO_BRIDGE_PREFERRED_ODD_MAX = float(os.getenv("BETANO_BRIDGE_PREFERRED_ODD_MAX", "1.70"))
 
+# Fase D.2 — descoberta automática de fixtures Betano via bridge /events/live.
+# Worker chama bridge periodicamente, casa events com fixtures API-Football,
+# UPSERTa em betano_fixture_map. BETANO_EVENT_MAP fica como override manual.
+# Só inicia se USE_BETANO_BRIDGE=true (worker depende do bridge).
+BETANO_DISCOVERY_ENABLED = os.getenv("BETANO_DISCOVERY_ENABLED", "true").lower() == "true"
+BETANO_DISCOVERY_POLL_SEC = int(os.getenv("BETANO_DISCOVERY_POLL_SEC", "150"))
+# Threshold de confidence pra fuzzy match Betano ↔ API-Football aceitar.
+MATCH_CONFIDENCE_THRESHOLD = float(os.getenv("MATCH_CONFIDENCE_THRESHOLD", "0.85"))
+
 
 def _parse_betano_event_map(raw: str) -> dict:
     """Parseia "fixture_id1=event_id1,fixture_id2=event_id2" -> {int: str}.
@@ -258,7 +267,13 @@ def _parse_betano_event_map(raw: str) -> dict:
     return mapping
 
 
-# Seed manual fixture_id -> betano_event_id (temporário, ver Fase D).
+# Seed manual fixture_id -> betano_event_id. A partir da Fase D.2 isto é
+# OVERRIDE OPCIONAL — BetanoFixtureDiscovery descobre fixtures via bridge
+# automaticamente. Use BETANO_EVENT_MAP só pra:
+#   (a) DEV/debug local (forçar mapping pra teste)
+#   (b) overrides manuais quando fuzzy match falha (confidence < threshold)
+# UPSERT do seed manual sobrescreve resolved_via como 'manual_seed', então
+# inspeção SQL distingue dos resolvidos via discovery.
 BETANO_EVENT_MAP = _parse_betano_event_map(os.getenv("BETANO_EVENT_MAP", ""))
 
 

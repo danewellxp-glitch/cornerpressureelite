@@ -62,8 +62,11 @@ from utils.helpers import parse_fixture_to_jogo, enrich_jogo_with_cards
 from data.odds_provider import CanonicalFixture
 from data.providers.factory import build_providers
 from data.repositories.fixture_map import FixtureMapRepo
+from data.repositories.betano_team_map import BetanoTeamMapRepo
 from data.repositories.odds_history import OddsHistoryRepo
 from data.persistence.odds_worker import OddsPersistenceWorker
+from data.discovery.fixture_matcher import FixtureMatcher
+from workers.betano_discovery import BetanoFixtureDiscovery
 
 logger = logging.getLogger("CPES.Main")
 
@@ -113,6 +116,9 @@ class CornerPressureElite:
         # Worker de telemetria de odds (Fase D.0) — instanciado em iniciar()
         # só quando USE_BETANO_BRIDGE=true.
         self.odds_persistence_worker: Optional[OddsPersistenceWorker] = None
+        # Worker de descoberta automática de fixtures Betano (Fase D.2).
+        # Só inicia quando USE_BETANO_BRIDGE=true AND BETANO_DISCOVERY_ENABLED.
+        self.betano_discovery: Optional[BetanoFixtureDiscovery] = None
         # Última captura de telemetria por (fixture_id, market) -> timestamp ms.
         self._last_capture_at: Dict[tuple, int] = {}
         self._running = False
@@ -170,9 +176,21 @@ class CornerPressureElite:
         # USE_BETANO_BRIDGE=false -> composite_odds fica None, pipeline legado.
         if USE_BETANO_BRIDGE:
             seeded = await self.database.seed_betano_fixture_map(BETANO_EVENT_MAP)
-            logger.info(
-                f"BETANO_EVENT_MAP: {seeded} fixture(s) seedados em betano_fixture_map"
-            )
+            if seeded > 0:
+                logger.info(
+                    f"BETANO_EVENT_MAP: {seeded} fixture(s) seedados manualmente "
+                    f"(override). BetanoFixtureDiscovery complementa automaticamente."
+                )
+            elif config.BETANO_DISCOVERY_ENABLED:
+                logger.info(
+                    "BETANO_EVENT_MAP vazio — BetanoFixtureDiscovery vai popular "
+                    "betano_fixture_map automaticamente via bridge /events/live."
+                )
+            else:
+                logger.warning(
+                    "BETANO_EVENT_MAP vazio E BETANO_DISCOVERY_ENABLED=false — "
+                    "betano_fixture_map ficará sem mapeamentos novos."
+                )
             # Telemetria de odds (Fase D.0): worker batcha inserts em
             # odds_history. Iniciado ANTES de build_providers — o adapter
             # Betano recebe a referência via factory.
@@ -192,6 +210,26 @@ class CornerPressureElite:
                 )
             )
             logger.info("CompositeOddsProvider ativo (bridge Betano primário)")
+
+            # Fase D.2: descoberta automática de fixtures Betano via bridge.
+            # BETANO_EVENT_MAP segue como override manual; discovery complementa.
+            if config.BETANO_DISCOVERY_ENABLED:
+                from config import LIGAS_MONITORADAS
+                team_repo = BetanoTeamMapRepo(self.database.pool)
+                matcher = FixtureMatcher(
+                    team_repo=team_repo,
+                    confidence_threshold=config.MATCH_CONFIDENCE_THRESHOLD,
+                )
+                self.betano_discovery = BetanoFixtureDiscovery(
+                    bridge_url=config.BETANO_BRIDGE_URL,
+                    api_client=self.api_client,
+                    matcher=matcher,
+                    fixture_repo=fixture_repo,
+                    team_repo=team_repo,
+                    league_ids=[liga["id"] for liga in LIGAS_MONITORADAS],
+                    poll_sec=config.BETANO_DISCOVERY_POLL_SEC,
+                )
+                await self.betano_discovery.start()
 
         # Restaurar timestamps de jogos ja alertados hoje (sobrevive a restart)
         await self._load_pre_game_alerted()
@@ -1563,6 +1601,8 @@ class CornerPressureElite:
         if self.odds_persistence_worker is not None:
             await self.odds_persistence_worker.stop()
             logger.info("OddsPersistenceWorker parado")
+        if self.betano_discovery is not None:
+            await self.betano_discovery.stop()
 
         stats = await self.database.get_estatisticas()
         logger.info(
