@@ -129,7 +129,13 @@ Chrome 148 do pool **continua ativo** no danewell (Xvfb :100, CDP 9223 LAN-expos
 - ❌ Sem PARTE A (`/teams` no bridge), catálogo Betano não é populado proativamente — só matches on-demand criam entries
 - ❌ Validação E2E ainda sem overlap real (jogos noturnos atuais são fora das ligas monitoradas — esperado, não bug)
 
-**Status:** ATIVA. Worker rodando em produção desde 2026-05-16 ~02h UTC. PARTE A pendente pra próxima sessão.
+**Status:** ATIVA. Worker rodando em produção desde 2026-05-16 ~02h UTC.
+
+**PARTE A entregue em sessão 6 (2026-05-16 ~03h UTC):**
+- Achado: `/api/static-content/assets/teams` (8.8MB) tem só logos/cores, ZERO `name`. Não serve pra `betano_team_map.betano_team_name`.
+- Solução: danewell ganha `/danae/teams` que agrega `participants[]` de `/danae/live` + `/api/home/upcoming-coupons` (fetch paralelo, dedupe por team_id, live > upcoming, source debug). Bridge ganha `/teams` proxy com cache 24h em memória (key por sport, configurável via `TEAMS_CACHE_TTL_SEC`). Worker chama 1×/dia, `bulk_upsert` com `match_method='static_catalog'`.
+- Validado em produção: 92 teams populados via static_catalog. Bridge cache: 5.07s miss → 42ms hit.
+- Nenhuma mudança no FixtureMatcher — lookup determinístico já estava implementado na PARTE C original (commit 90d7675).
 
 ---
 

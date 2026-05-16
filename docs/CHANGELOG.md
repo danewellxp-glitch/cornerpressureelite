@@ -17,6 +17,47 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-16 (sessão 6) — Fase D.2 PARTE A: catálogo de teams via bridge
+
+**Contexto:** Sessão 5 entregou D.2 com PARTE A pendente. Discovery rodando 100% via fuzzy match (sem catálogo prévio). PARTE A popula `betano_team_map` proativamente pra acelerar lookup determinístico.
+
+**Achado crítico durante implementação:** `/api/static-content/assets/teams` (8.8MB, identificado em sessões anteriores como "catálogo de teams") tem só logos/cores. **Zero campos `name`**. Não serve pra popular `betano_team_map.betano_team_name`. Re-investiguei `.mitm` e descobri que `/danae/live` (já temos) + `/api/home/upcoming-coupons` agregados cobrem todos teams ativos do dia via `participants[].{name, id}`.
+
+**O que foi feito:**
+
+- **No danewell** (Claude lá): `/danae/teams` agrega `participants[]` de 2 endpoints em paralelo (`asyncio.gather`), normaliza team_id pra int (upcoming-coupons retorna string), dedupe por team_id com live > upcoming, marca `source` (`live`|`upcoming`|`live+upcoming`). Fail-soft pra `upcoming-coupons` (retorna só live com `upcoming_failed: true`). 152 teams total no smoke (live=140, upcoming=22, overlap=10), 5.58s. Validado pelo Daniel.
+- **No bridge** (odin): `GET /teams` proxy ao danewell + cache em memória 24h, key por sport, configurável via `TEAMS_CACHE_TTL_SEC`. Suporta `?force_refresh=true`. Cache MISS 5.07s, HIT 42ms.
+- **No cpes-main**: `BetanoFixtureDiscovery._refresh_teams_catalog()` chama bridge `/teams`, bulk_upsert no `betano_team_map` com `match_method='static_catalog'`. Trigger automático no `_loop` quando intervalo > 86400s. Fail-soft (erro loga warning, não para `_loop`). Filtros de input: descarta team_id inválido / name vazio.
+
+**PARTE A.3.3 (matcher lookup) PULADA** — já estava implementada na PARTE C original (sessão 5, commit `90d7675`). Matcher tenta team_id_lookup ANTES de fuzzy.
+
+**Validação:**
+- 4 testes novos no worker (`test_refresh_teams_catalog_*`), 10 testes verdes no arquivo (era 6)
+- 37 testes verdes em arquivos relacionados (era 33)
+- Sem regressão
+
+**Smoke E2E em produção:**
+- `refresh catálogo OK: count=92 upserted=92 from_cache=True sport=FOOT`
+- `betano_team_map`: 92 entries, todas `match_method='static_catalog'`
+- Sample populado: Albirex Niigata, Vegalta Sendai, Consadole Sapporo, Tokyo Verdy, Shonan Bellmare (J-League agendados)
+- Bridge cache foi usado (worker pegou from_cache=true porque eu já tinha rodado curl antes)
+
+**Decisões:** Atualização in-place na [decisão original da sessão 5](DECISIONS.md#2026-05-16-sessão-5--fase-d2-descoberta-automática-de-fixtures-betano) com nota sobre PARTE A entregue.
+
+**Estado final:**
+- ✅ Pipeline D.2 completo: catálogo + discovery + matcher (lookup → fuzzy → cache resultado)
+- ✅ `betano_team_map` populando proativamente 1×/dia
+- ✅ Bridge cache 24h reduz pressão no danewell (volume baixo)
+- ⏳ 0 matches reais ainda (esperando jogo de liga monitorada ao vivo — não é bug)
+- ⏳ Fase E (Adapter Stats Betano) próxima
+
+**Próximos passos:**
+- Observar 24-48h: confirmar `betano_team_map` cresce com novos teams + matches reais aparecem quando overlap
+- Considerar `TEAMS_CACHE_TTL_SEC` menor (6h?) se catálogo Betano flutuar muito durante o dia
+- Próxima fase: Adapter Stats Betano (Phase E do roadmap)
+
+---
+
 ## 2026-05-16 (sessão 5) — Fase D.2: discovery worker no cpes-main
 
 **Contexto:** D.1 entregou o bridge `/events/live`. D.2 era automatizar a população do `betano_fixture_map` via matching com fixtures API-Football das ligas monitoradas, eliminando o `BETANO_EVENT_MAP` manual.

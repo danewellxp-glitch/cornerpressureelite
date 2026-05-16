@@ -15,17 +15,15 @@ Fases planejadas + estado atual. Atualizado quando fase fecha ou nova é planeja
 - **Bridge Pool** — Pool distribuído (odin local + danewell LAN)
 - **Fase D.1** — Bridge `/events/live` via Brave do pool danewell (renewer + danae API)
 - **Fase D.2** — Worker `BetanoFixtureDiscovery` no cpes-main (matcher fuzzy + UPSERT auto). BETANO_EVENT_MAP virou override opcional.
+- **Fase D.2 PARTE A** — Catálogo de teams 1×/dia: danewell `/danae/teams` (agrega live + upcoming) → bridge `/teams` (cache 24h) → worker refresh popula `betano_team_map` proativamente
 - **Proxy residencial** — Brave do pool sai por IP RJ (ML Telecom) pra diversificar fingerprint
 - **Systemd units** — Bridge resilient a crash + reboot
 
 ## Em progresso
 
-- **PARTE A do D.2** — bridge `/teams` endpoint (depende de `/danae/teams` no renewer danewell)
 - **Smoke real D.0 + D.2** — Validar telemetria + matches em jogo de liga monitorada ao vivo (pendente overlap real)
 
 ## Próximas fases (Caminho A — eliminar API-Football)
-
-### D.2 PARTE A (pendente, ~1h) — bridge `/teams` + worker refresh catálogo 1×/dia
 
 ### Fase E — Adapter Stats (~10-14h)
 - /api/statsstream/<id>/stats/detailed
