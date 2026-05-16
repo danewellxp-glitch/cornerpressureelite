@@ -1,15 +1,19 @@
 """
 CPES Data Reader - Funções puras para leitura de dados.
-Usado por monitor.py (terminal) e api_server.py (API web).
+Usado pela API web. Agora busca os estados JSON da tabela app_state.
 """
 
 import json
 import os
-import sqlite3
-import time
+import asyncio
 from datetime import datetime
 
-from config import API_DAILY_LIMIT, DB_PATH
+from storage.database import Database
+from config import API_DAILY_LIMIT
+
+
+# Inicializa a conexão DB_READER para ser usada de forma assíncrona
+db_reader = Database()
 
 
 def get_log_file():
@@ -27,62 +31,34 @@ def read_last_lines(filepath: str, n: int = 20) -> list:
         return ["[Log nao encontrado]\n"]
 
 
-def get_db_stats() -> dict:
-    db_path = DB_PATH
-    if not os.path.exists(db_path):
-        return {"total": 0, "greens": 0, "reds": 0, "pendentes": 0, "winrate": 0.0, "roi_total": 0.0}
+async def get_db_stats(tipo_analise: str = None) -> dict:
+    return await db_reader.get_estatisticas(tipo_analise)
 
+
+async def get_recent_signals(limit: int = 5, tipo_analise: str = None) -> list:
+    """Retorna sinais recentes."""
     try:
-        conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
-
-        cur.execute("SELECT COUNT(*) FROM sinais")
-        total = cur.fetchone()[0]
-
-        cur.execute("SELECT COUNT(*) FROM sinais WHERE resultado = 'GREEN'")
-        greens = cur.fetchone()[0]
-
-        cur.execute("SELECT COUNT(*) FROM sinais WHERE resultado = 'RED'")
-        reds = cur.fetchone()[0]
-
-        cur.execute("SELECT COALESCE(SUM(roi), 0) FROM sinais WHERE roi IS NOT NULL")
-        roi_total = cur.fetchone()[0]
-
-        conn.close()
-
-        pendentes = total - greens - reds
-        winrate = (greens / (greens + reds) * 100) if (greens + reds) > 0 else 0
-
-        return {
-            "total": total,
-            "greens": greens,
-            "reds": reds,
-            "pendentes": pendentes,
-            "winrate": round(winrate, 1),
-            "roi_total": round(roi_total, 2),
-        }
-    except Exception:
-        return {"total": 0, "greens": 0, "reds": 0, "pendentes": 0, "winrate": 0.0, "roi_total": 0.0}
-
-
-def get_recent_signals(limit: int = 5) -> list:
-    db_path = DB_PATH
-    if not os.path.exists(db_path):
-        return []
-
-    try:
-        conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT timestamp, jogo_descricao, tipo_sinal, pressure_score, "
-            "projecao, edge, linha, odd, resultado, escanteios_final FROM sinais "
-            "ORDER BY id DESC LIMIT ?",
-            (limit,),
-        )
-        rows = cur.fetchall()
-        conn.close()
-        return rows
-    except Exception:
+        await db_reader.connect()
+        async with db_reader.pool.acquire() as conn:
+            query = """
+                SELECT timestamp, jogo_descricao, tipo_sinal, pressure_score, 
+                projecao, edge, linha, odd, resultado, escanteios_final, tipo_analise 
+                FROM sinais 
+                WHERE id IN (
+                    SELECT MAX(id) FROM sinais
+            """
+            params = []
+            
+            if tipo_analise:
+                query += " WHERE tipo_analise = $1"
+                params.append(tipo_analise)
+                
+            query += " GROUP BY jogo_id) ORDER BY id DESC LIMIT $" + str(len(params) + 1)
+            params.append(limit)
+            
+            rows = await conn.fetch(query, *params)
+            return [dict(row) for row in rows]
+    except Exception as e:
         return []
 
 
@@ -144,17 +120,11 @@ def parse_log_for_status(lines: list) -> dict:
     return info
 
 
-LIVE_STATE_PATH = os.path.join(os.path.dirname(__file__), "data", "live_state.json")
-UPCOMING_GAMES_PATH = os.path.join(os.path.dirname(__file__), "data", "upcoming_games.json")
-AUDIT_STATE_PATH = os.path.join(os.path.dirname(__file__), "data", "audit_state.json")
-
-
-def get_live_state() -> dict:
-    """Retorna estado dos jogos ao vivo (por fase, analisados, observados)."""
+async def get_live_state() -> dict:
+    """Retorna estado dos jogos ao vivo lendo do PostgreSQL."""
     try:
-        if os.path.exists(LIVE_STATE_PATH):
-            with open(LIVE_STATE_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
+        state = await db_reader.get_state("live_state")
+        if state: return state
     except Exception:
         pass
     return {
@@ -166,27 +136,20 @@ def get_live_state() -> dict:
         "ids_observados": [],
     }
 
-
-def get_upcoming_games() -> dict:
-    """Retorna próximos jogos programados com minutos_ate recalculado em tempo real."""
+async def get_upcoming_games() -> dict:
+    """Retorna próximos jogos programados lendo do PostgreSQL."""
     try:
-        if os.path.exists(UPCOMING_GAMES_PATH):
-            with open(UPCOMING_GAMES_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
+        data = await db_reader.get_state("upcoming_games")
+        import time
+        if data:
             now = time.time()
             proximos = []
             for game in data.get("proximos", []):
                 ts = game.get("timestamp", 0)
-                if not ts:
-                    continue
-                # Pula jogos ja terminados (estimativa 105 min = 6300 seg)
-                if ts + 6300 < now:
-                    continue
-                # Recalcula minutos_ate em tempo real
+                if not ts: continue
+                if ts + 6300 < now: continue
                 game["minutos_ate"] = max(0, int((ts - now) / 60))
                 proximos.append(game)
-
             return {
                 "atualizado": datetime.now().isoformat(),
                 "proximos": proximos,
@@ -199,12 +162,11 @@ def get_upcoming_games() -> dict:
     }
 
 
-def get_audit_state() -> dict:
+async def get_audit_state() -> dict:
     """Retorna dados de auditoria do último ciclo de análise."""
     try:
-        if os.path.exists(AUDIT_STATE_PATH):
-            with open(AUDIT_STATE_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
+        state = await db_reader.get_state("audit_state")
+        if state: return state
     except Exception:
         pass
     return {
@@ -213,62 +175,56 @@ def get_audit_state() -> dict:
         "funil": {
             "total_analisados": 0,
             "passou_filtros": 0,
-            "score_ok": 0,
-            "edge_ok": 0,
-            "sinais_emitidos": 0,
-            "premium": 0,
-            "normal": 0,
+            "score_ok": 0, "edge_ok": 0,
+            "sinais_emitidos": 0, "premium": 0, "normal": 0,
         },
         "filtros_breakdown": {},
         "jogos": [],
         "taxas": {
-            "elegibilidade": 0,
-            "conversao_score": 0,
-            "conversao_edge": 0,
-            "hit_rate": 0,
+            "elegibilidade": 0, "conversao_score": 0,
+            "conversao_edge": 0, "hit_rate": 0,
         },
     }
 
-
-def get_signals_history(days: int = 7) -> list:
+async def get_signals_history(days: int = 7, tipo_analise: str = None) -> list:
     """Retorna contagem de sinais por dia nos últimos N dias."""
-    db_path = DB_PATH
-    if not os.path.exists(db_path):
-        return []
-
     try:
-        conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
-        cur.execute(
+        await db_reader.connect()
+        async with db_reader.pool.acquire() as conn:
+            where_clause = "WHERE timestamp >= NOW() - INTERVAL '" + str(days) + " days'"
+            params = []
+            
+            if tipo_analise:
+                where_clause += " AND tipo_analise = $1"
+                params.append(tipo_analise)
+                
+            query = f"""
+                SELECT
+                    DATE(timestamp) as dia,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN tipo_sinal = 'PREMIUM' THEN 1 ELSE 0 END) as premium,
+                    SUM(CASE WHEN tipo_sinal = 'NORMAL' THEN 1 ELSE 0 END) as normal,
+                    SUM(CASE WHEN resultado = 'GREEN' THEN 1 ELSE 0 END) as greens,
+                    SUM(CASE WHEN resultado = 'RED' THEN 1 ELSE 0 END) as reds,
+                    COALESCE(SUM(roi), 0) as roi
+                FROM sinais
+                {where_clause}
+                GROUP BY DATE(timestamp)
+                ORDER BY dia DESC
             """
-            SELECT
-                date(timestamp) as dia,
-                COUNT(*) as total,
-                SUM(CASE WHEN tipo_sinal = 'PREMIUM' THEN 1 ELSE 0 END) as premium,
-                SUM(CASE WHEN tipo_sinal = 'NORMAL' THEN 1 ELSE 0 END) as normal,
-                SUM(CASE WHEN resultado = 'GREEN' THEN 1 ELSE 0 END) as greens,
-                SUM(CASE WHEN resultado = 'RED' THEN 1 ELSE 0 END) as reds,
-                COALESCE(SUM(roi), 0) as roi
-            FROM sinais
-            WHERE timestamp >= date('now', ?)
-            GROUP BY date(timestamp)
-            ORDER BY dia DESC
-            """,
-            (f"-{days} days",),
-        )
-        rows = cur.fetchall()
-        conn.close()
-        return [
-            {
-                "dia": r[0],
-                "total": r[1],
-                "premium": r[2],
-                "normal": r[3],
-                "greens": r[4],
-                "reds": r[5],
-                "roi": round(r[6], 2),
-            }
-            for r in rows
-        ]
+            
+            rows = await conn.fetch(query, *params)
+            return [
+                {
+                    "dia": str(r["dia"]),
+                    "total": r["total"],
+                    "premium": r["premium"],
+                    "normal": r["normal"],
+                    "greens": r["greens"],
+                    "reds": r["reds"],
+                    "roi": round(r["roi"], 2),
+                }
+                for r in rows
+            ]
     except Exception:
         return []

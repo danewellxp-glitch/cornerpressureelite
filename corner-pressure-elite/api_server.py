@@ -74,6 +74,7 @@ from storage.database import Database
 from notifier.whatsapp_client import WhatsAppClient, WAHAConfig
 from notifier.waha_manager import send_whatsapp_message, get_waha_last_health, check_waha_health
 from notifier.message_formatter import MessageFormatter
+from api.public import router as public_router
 
 logger = logging.getLogger("CPES.API")
 
@@ -94,6 +95,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(public_router)
 
 
 # ============= Background task: recovery de checkout abandonado =============
