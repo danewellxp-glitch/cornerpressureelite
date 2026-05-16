@@ -1,39 +1,105 @@
 @import "tailwindcss";
 
+/* ===========================================================================
+ * Design tokens — landing PressureIQ
+ * Sincronizados com landing-font-4-bricolage.html (referência do design).
+ * ========================================================================== */
 :root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-  --card-bg: #1a1a1a;
-  --card-border: rgba(255, 255, 255, 0.05);
-  --primary: #00d9ff;
-  --primary-rgb: 0, 217, 255;
+  --bg: #0a0a0a;
+  --bg-elevated: #111111;
+  --bg-card: #0f0f0f;
+  --border: #1a1a1a;
+  --border-bright: #2a2a2a;
+  --text: #fafafa;
+  --text-muted: #737373;
+  --text-dim: #525252;
+  --green: #10b981;
+  --green-bright: #34d399;
+  --green-dim: #047857;
+  --cyan: #22d3ee;
+  --red: #ef4444;
+  --yellow: #fbbf24;
+
+  --background: var(--bg);
+  --foreground: var(--text);
 }
 
 @theme inline {
+  --color-bg: var(--bg);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-bg-card: var(--bg-card);
+  --color-border-base: var(--border);
+  --color-border-bright: var(--border-bright);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-dim: var(--text-dim);
+  --color-green: var(--green);
+  --color-green-bright: var(--green-bright);
+  --color-green-dim: var(--green-dim);
+  --color-cyan: var(--cyan);
+  --color-red: var(--red);
+  --color-yellow: var(--yellow);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+
+  --font-sans: var(--font-geist), -apple-system, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+  --font-display: var(--font-bricolage), var(--font-geist), sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist), -apple-system, system-ui, sans-serif;
+  line-height: 1.5;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Smooth transitions */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+body.has-grain::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3CfeColorMatrix values='0 0 0 0 0.06 0 0 0 0 0.06 0 0 0 0 0.06 0 0 0 0.4 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 100;
+  mix-blend-mode: overlay;
+}
+
+@keyframes ticker-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.3s ease-out forwards;
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
