@@ -97,7 +97,9 @@ export function useDashboardStream(): StreamState {
         connect();
     }, [connect]);
 
-    // Conecta no mount; desconecta no unmount
+    // Conecta no mount; desconecta no unmount. Deps vazias intencionalmente —
+    // `connect`/`cleanup` sao estaveis (useCallback com deps []), e qualquer
+    // re-identificacao futura nao pode disparar reconect loop.
     useEffect(() => {
         connect();
         return () => {
@@ -107,7 +109,8 @@ export function useDashboardStream(): StreamState {
                 hiddenTimerRef.current = null;
             }
         };
-    }, [connect, cleanup]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Page Visibility: desconecta se em background > 5min, reconecta on focus
     useEffect(() => {
@@ -115,7 +118,11 @@ export function useDashboardStream(): StreamState {
         const handler = () => {
             if (document.hidden) {
                 hiddenSinceRef.current = Date.now();
-                // Agenda desconexão depois de 5min em background
+                // Limpa timer anterior antes de re-agendar — evita leak quando
+                // o user toggle a aba varias vezes em <5min.
+                if (hiddenTimerRef.current != null) {
+                    window.clearTimeout(hiddenTimerRef.current);
+                }
                 hiddenTimerRef.current = window.setTimeout(() => {
                     cleanup();
                     setStatus("offline");
@@ -136,7 +143,8 @@ export function useDashboardStream(): StreamState {
         };
         document.addEventListener("visibilitychange", handler);
         return () => document.removeEventListener("visibilitychange", handler);
-    }, [connect, cleanup]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     return { data, status, lastUpdate, reconnect };
 }

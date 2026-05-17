@@ -52,10 +52,11 @@ export function Shell({
     const [open, setOpen] = useState(true);
 
     // Sincroniza o JWT do cookie (lido server-side no layout) pro localStorage.
-    // useDashboardStream le de localStorage. Fallback pra sessoes que entraram
-    // via cookie antigo sem passar pelo login novo (que ja popula localStorage).
+    // useDashboardStream le de localStorage. Sempre re-grava quando o token muda
+    // pra cobrir renovacao silenciosa do JWT pelo backend (cookie atualizado,
+    // localStorage ficaria com token velho expirado).
     useEffect(() => {
-        if (token && typeof window !== "undefined" && !localStorage.getItem("token")) {
+        if (token && typeof window !== "undefined" && localStorage.getItem("token") !== token) {
             localStorage.setItem("token", token);
         }
     }, [token]);

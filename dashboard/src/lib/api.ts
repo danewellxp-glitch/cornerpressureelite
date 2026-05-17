@@ -176,12 +176,14 @@ export interface UpcomingGamesResponse {
 // ─── Fetchers ───────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers: HeadersInit = { ...init?.headers };
+  const headers: Record<string, string> = {
+    ...(init?.headers as Record<string, string> | undefined),
+  };
 
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("token");
     if (token) {
-      (headers as any)["Authorization"] = `Bearer ${token}`;
+      headers["Authorization"] = `Bearer ${token}`;
     }
   }
 

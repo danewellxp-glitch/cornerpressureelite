@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchStrategyPreference, updateStrategyPreference } from "@/lib/api";
 import { isValidTier, type StrategyTier } from "@/lib/strategies";
 
@@ -18,6 +18,10 @@ export function useStrategyPreference() {
     const [preference, setPreference] = useState<UserStrategyPreference>(DEFAULT_PREF);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string>("");
+    // Seq counter: ignora respostas de updates antigos quando o user dispara
+    // varios em sequencia (ex: troca corners e cards rapido). So o ultimo
+    // dispatch + reverte em caso de erro.
+    const updateSeqRef = useRef(0);
 
     const load = useCallback(async () => {
         try {
@@ -37,13 +41,17 @@ export function useStrategyPreference() {
 
     const update = useCallback(async (patch: Partial<UserStrategyPreference>) => {
         setPreference((prev) => ({ ...prev, ...patch }));
+        const mySeq = ++updateSeqRef.current;
         try {
             await updateStrategyPreference({
                 ...(patch.corners ? { corners_strategy: patch.corners } : {}),
                 ...(patch.cards ? { cards_strategy: patch.cards } : {}),
             });
-            window.dispatchEvent(new Event("strategy-pref-updated"));
+            if (updateSeqRef.current === mySeq) {
+                window.dispatchEvent(new Event("strategy-pref-updated"));
+            }
         } catch (err) {
+            if (updateSeqRef.current !== mySeq) return; // call mais recente cuida
             setError(err instanceof Error ? err.message : "Erro ao salvar preferência");
             load();
         }
