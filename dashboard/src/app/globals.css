@@ -1,81 +1,313 @@
+/* @import precisa vir antes de qualquer outra regra (CSS spec). */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Sora:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
-/* ===========================================================================
- * Design tokens — landing PressureIQ
- * Sincronizados com landing-font-4-bricolage.html (referência do design).
- * ========================================================================== */
+/* ─── Tailwind v4 @theme: tokens semânticos usados pela landing PressureIQ ───
+   Valores literais (sem indireção via var(--piq-*)) para evitar bug do
+   `@theme inline` que produzia var(--mint-bright) inexistente. */
+@theme {
+  --color-background: oklch(0.16 0.025 235);
+  --color-foreground: oklch(0.96 0.01 180);
+  --color-card: oklch(0.20 0.028 232);
+  --color-card-foreground: oklch(0.96 0.01 180);
+  --color-popover: oklch(0.20 0.028 232);
+  --color-popover-foreground: oklch(0.96 0.01 180);
+  --color-primary: oklch(0.62 0.22 255);
+  --color-primary-foreground: oklch(0.16 0.025 235);
+  --color-secondary: oklch(0.26 0.04 225);
+  --color-secondary-foreground: oklch(0.96 0.01 180);
+  --color-muted: oklch(0.26 0.04 225);
+  --color-muted-foreground: oklch(0.70 0.02 200);
+  --color-accent: oklch(0.62 0.22 255);
+  --color-accent-foreground: oklch(0.96 0.01 180);
+  --color-destructive: oklch(0.65 0.22 25);
+  --color-destructive-foreground: oklch(0.96 0.01 180);
+  --color-border: oklch(0.30 0.03 220 / 60%);
+  --color-input: oklch(0.26 0.03 225);
+  --color-ring: oklch(0.62 0.22 255);
+  --color-mint: oklch(0.62 0.22 255);
+  --color-mint-bright: oklch(0.74 0.18 235);
+  --color-ink: oklch(0.18 0.03 230);
+  --color-success: oklch(0.78 0.18 155);
+  --color-warning: oklch(0.82 0.16 80);
+  --color-danger: oklch(0.65 0.22 25);
+
+  /* Tokens extras usados pela landing redesign (commit 33ad02c).
+     Mantidos com valores hex pretos pra preservar o look "dark editorial"
+     da landing — diferentes do oklch azulado do dashboard. */
+  --color-elevated: #111111;
+  --color-border-bright: #2a2a2a;
+  --color-dim: #525252;
+  --color-green-bright: #34d399;
+  --color-cyan: #22d3ee;
+  --color-yellow: #fbbf24;
+
+  --font-display: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
 :root {
-  --bg: #0a0a0a;
-  --bg-elevated: #111111;
-  --bg-card: #0f0f0f;
-  --border: #1a1a1a;
-  --border-bright: #2a2a2a;
-  --text: #fafafa;
-  --text-muted: #737373;
-  --text-dim: #525252;
-  --green: #10b981;
-  --green-bright: #34d399;
-  --green-dim: #047857;
-  --cyan: #22d3ee;
-  --red: #ef4444;
-  --yellow: #fbbf24;
+  --bg-primary: #0B0E14;
+  --bg-card: #131720;
+  --text-primary: #E4E6EB;
+  --text-secondary: #8B8D97;
+  --accent: #7C4DFF;
+  --accent-light: #B47CFF;
+  --cyan: #00E5FF;
+  --green: #4CAF50;
+  --red: #FF5252;
+  --amber: #FFC107;
+  --border: rgba(255,255,255,0.06);
 
-  --background: var(--bg);
-  --foreground: var(--text);
+  /* ─── Landing PressureIQ (Neon Mint) ───
+     Tokens só usados pela landing pública (.piq-landing). MUI / authed area
+     continuam usando as vars acima. */
+  --piq-ink: oklch(0.18 0.03 230);
+  --piq-bg: oklch(0.16 0.025 235);
+  --piq-fg: oklch(0.96 0.01 180);
+  --piq-card: oklch(0.20 0.028 232);
+  --piq-secondary: oklch(0.26 0.04 225);
+  --piq-muted-fg: oklch(0.70 0.02 200);
+  --piq-border: oklch(0.30 0.03 220 / 60%);
+  --piq-input: oklch(0.26 0.03 225);
+  --piq-mint: oklch(0.62 0.22 255);
+  --piq-mint-bright: oklch(0.74 0.18 235);
+  --piq-primary-fg: oklch(0.16 0.025 235);
+  --piq-destructive: oklch(0.65 0.22 25);
+  --piq-font-display: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --piq-font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --piq-font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 
-@theme inline {
-  --color-bg: var(--bg);
-  --color-bg-elevated: var(--bg-elevated);
-  --color-bg-card: var(--bg-card);
-  --color-border-base: var(--border);
-  --color-border-bright: var(--border-bright);
-  --color-text: var(--text);
-  --color-text-muted: var(--text-muted);
-  --color-text-dim: var(--text-dim);
-  --color-green: var(--green);
-  --color-green-bright: var(--green-bright);
-  --color-green-dim: var(--green-dim);
-  --color-cyan: var(--cyan);
-  --color-red: var(--red);
-  --color-yellow: var(--yellow);
+/* Reset legado escopado a @layer base pra não vencer das utilities Tailwind
+   (regras fora de @layer ganham de regras em layer, mesmo com menor
+   especificidade — era isto que zerava todo padding/margin da landing). */
+@layer base {
+  * { box-sizing: border-box; margin: 0; padding: 0; }
 
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-
-  --font-sans: var(--font-geist), -apple-system, system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
-  --font-display: var(--font-bricolage), var(--font-geist), sans-serif;
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+  }
 }
 
-* {
-  box-sizing: border-box;
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-in { animation: fadeIn 0.3s ease-out; }
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(124,77,255,0.2); }
+  50% { box-shadow: 0 0 20px rgba(124,77,255,0.4); }
 }
 
-html {
-  scroll-behavior: smooth;
+/* ─── Stagger entry animation para a sequência .animate-in dentro de uma rota ─── */
+.animate-in:nth-child(1) { animation-delay: 0ms; }
+.animate-in:nth-child(2) { animation-delay: 40ms; }
+.animate-in:nth-child(3) { animation-delay: 80ms; }
+.animate-in:nth-child(4) { animation-delay: 120ms; }
+.animate-in:nth-child(5) { animation-delay: 160ms; }
+.animate-in:nth-child(6) { animation-delay: 200ms; }
+.animate-in {
+  animation-fill-mode: backwards;
 }
 
-body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-geist), -apple-system, system-ui, sans-serif;
-  line-height: 1.5;
-  overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
+/* ─── Hover sutil em todos os MuiCard (lift + glow accent) ─── */
+.MuiCard-root {
+  transition:
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 200ms ease-out,
+    box-shadow 200ms ease-out;
+}
+.MuiCard-root:hover {
+  transform: translateY(-2px);
+  border-color: rgba(124, 77, 255, 0.25);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(124, 77, 255, 0.15);
 }
 
-body.has-grain::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3CfeColorMatrix values='0 0 0 0 0.06 0 0 0 0 0.06 0 0 0 0 0.06 0 0 0 0.4 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  opacity: 0.5;
-  pointer-events: none;
-  z-index: 100;
-  mix-blend-mode: overlay;
+/* ─── Buttons MUI: leve squish no clique (já que muitos não usam framer-motion) ─── */
+.MuiButtonBase-root {
+  transition:
+    background-color 180ms ease-out,
+    color 180ms ease-out,
+    transform 120ms ease-out,
+    box-shadow 180ms ease-out !important;
+}
+.MuiButtonBase-root:active {
+  transform: scale(0.97);
 }
 
+/* ─── Chips e indicators ─── */
+.MuiChip-root {
+  transition: background-color 180ms ease-out, color 180ms ease-out, transform 180ms ease-out;
+}
+
+/* ─── View Transitions API ─── */
+@supports (view-transition-name: none) {
+  ::view-transition-old(page-content),
+  ::view-transition-new(page-content) {
+    animation-duration: 280ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  ::view-transition-old(page-content) {
+    animation-name: vt-fade-out;
+  }
+  ::view-transition-new(page-content) {
+    animation-name: vt-fade-in;
+  }
+}
+
+@keyframes vt-fade-out {
+  to { opacity: 0; transform: translateY(-6px); }
+}
+@keyframes vt-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+/* ─── Reduce motion: respeita preferência do user ─── */
+@media (prefers-reduced-motion: reduce) {
+  .animate-in,
+  .MuiCard-root,
+  .MuiButtonBase-root,
+  .MuiChip-root {
+    transition: none !important;
+    animation: none !important;
+  }
+  .MuiCard-root:hover {
+    transform: none;
+  }
+  ::view-transition-old(page-content),
+  ::view-transition-new(page-content) {
+    animation: none !important;
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════════════
+   Landing PressureIQ — escopado a .piq-landing pra não vazar pra MUI.
+   ═════════════════════════════════════════════════════════════════════ */
+.piq-landing {
+  background-color: var(--piq-bg);
+  color: var(--piq-fg);
+  font-family: var(--piq-font-sans);
+  min-height: 100vh;
+}
+.piq-landing h1,
+.piq-landing h2,
+.piq-landing h3,
+.piq-landing h4 {
+  font-family: var(--piq-font-display);
+  letter-spacing: -0.02em;
+}
+.piq-landing .piq-font-display { font-family: var(--piq-font-display); }
+.piq-landing .piq-font-mono { font-family: var(--piq-font-mono); }
+
+.piq-landing .piq-grid-bg {
+  background-image:
+    linear-gradient(to right, oklch(0.62 0.22 255 / 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(0.62 0.22 255 / 0.06) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+.piq-landing .piq-glow-mint {
+  box-shadow: 0 0 60px -10px oklch(0.62 0.22 255 / 0.4);
+}
+.piq-landing .piq-text-gradient-mint {
+  background: linear-gradient(135deg, oklch(0.74 0.18 235), oklch(0.48 0.24 265));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.piq-landing .piq-auth-input {
+  width: 100%;
+  background: var(--piq-input);
+  border: 1px solid var(--piq-border);
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.875rem;
+  color: var(--piq-fg);
+  font-size: 0.875rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  font-family: inherit;
+}
+.piq-landing .piq-auth-input:focus {
+  outline: none;
+  border-color: var(--piq-mint);
+  box-shadow: 0 0 0 3px oklch(0.62 0.22 255 / 0.2);
+}
+.piq-landing .piq-auth-input::placeholder {
+  color: var(--piq-muted-fg);
+  opacity: 0.6;
+}
+
+/* ═════════════════════════════════════════════════════════════════════
+   Dashboard PressureIQ — utilities globais (mesma paleta da landing).
+   Diferente da landing, o dashboard NÃO é envelopado em .piq-landing —
+   os tokens já estão no @theme global, então bg-card/text-foreground/etc
+   funcionam diretamente.
+
+   `.piq-dashboard` shift os tokens de background/card pra paleta mais azul
+   (hue 240, chroma 0.04). Mint accent (170) fica intocado — mesma "voz"
+   visual da landing, mas terreno visualmente distinto.
+   ═════════════════════════════════════════════════════════════════════ */
+.piq-dashboard {
+  /* Azul profundo, claramente distinto da landing.
+     Hue 250 (azul puro), chroma 0.08-0.10 (visivelmente azul, não navy neutro).
+     Mint accent (170) fica preservado pra continuidade visual. */
+  --color-background: oklch(0.13 0.08 252);
+  --color-card: oklch(0.18 0.09 250);
+  --color-popover: oklch(0.20 0.09 250);
+  --color-secondary: oklch(0.26 0.10 248);
+  --color-muted: oklch(0.22 0.08 248);
+  --color-muted-foreground: oklch(0.72 0.04 240);
+  --color-border: oklch(0.40 0.10 245 / 50%);
+  --color-input: oklch(0.24 0.09 248);
+}
+.grid-bg {
+  background-image:
+    linear-gradient(to right, oklch(0.62 0.22 255 / 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(0.62 0.22 255 / 0.05) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+.glow-mint {
+  box-shadow: 0 0 60px -10px oklch(0.62 0.22 255 / 0.45);
+}
+.text-gradient-mint {
+  background: linear-gradient(135deg, oklch(0.74 0.18 235), oklch(0.48 0.24 265));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Stagger entry animation (Lovable's piq-in) */
+@keyframes piq-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.piq-in { animation: piq-fade-up 360ms cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.piq-in:nth-child(1) { animation-delay: 0ms; }
+.piq-in:nth-child(2) { animation-delay: 50ms; }
+.piq-in:nth-child(3) { animation-delay: 100ms; }
+.piq-in:nth-child(4) { animation-delay: 150ms; }
+.piq-in:nth-child(5) { animation-delay: 200ms; }
+.piq-in:nth-child(6) { animation-delay: 250ms; }
+.piq-in:nth-child(7) { animation-delay: 300ms; }
+.piq-in:nth-child(8) { animation-delay: 350ms; }
+@media (prefers-reduced-motion: reduce) {
+  .piq-in { animation: none !important; }
+}
+
+/* ═════════════════════════════════════════════════════════════════════
+   Animations da landing redesign (Ticker, indicadores ao vivo).
+   ═════════════════════════════════════════════════════════════════════ */
 @keyframes ticker-scroll {
   0% { transform: translateX(0); }
   100% { transform: translateX(-50%); }
@@ -95,11 +327,13 @@ body.has-grain::before {
   animation: fade-in 0.3s ease-out forwards;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
+body.has-grain::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3CfeColorMatrix values='0 0 0 0 0.06 0 0 0 0 0.06 0 0 0 0 0.06 0 0 0 0.4 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 100;
+  mix-blend-mode: overlay;
 }
