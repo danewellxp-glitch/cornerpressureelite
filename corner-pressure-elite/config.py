@@ -75,6 +75,9 @@ LIGAS_MONITORADAS = [
 
     # América do Sul (Season 2026 - calendário hemisfério sul)
     {"id": 128, "nome": "Liga Profesional Argentina", "pais": "Argentina", "media_esperada": 10.2, "season": 2026},
+
+    # América do Norte (Season 2026 - calendário MLS fev→dez)
+    {"id": 253, "nome": "MLS", "pais": "USA", "media_esperada": 10.8, "season": 2026},
 ]
 
 LIGA_IDS = [liga["id"] for liga in LIGAS_MONITORADAS]
@@ -162,6 +165,7 @@ LIGAS_MEDIA_CARTOES = {
     72: 4.1,   # Brasileirao B
     73: 4.6,   # Copa do Brasil (eliminatorias = mais tensao)
     128: 4.6,  # Liga Profesional Argentina
+    253: 4.0,  # MLS
 }
 
 

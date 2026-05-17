@@ -76,6 +76,16 @@ Próximos passos: (opcional)
 - Smoke real assíncrono — review lineups_history quando jogos começarem (2026-05-17 10:30 BRT+).
 - Consolidar Fase G ✅ no ROADMAP após validar 1ª captura real.
 
+**Atualização pós-fechamento (smoke real validado com MLS Seattle×LA ao vivo):**
+- Daniel apontou jogo MLS live (event 81380286). MLS não estava em `LIGAS_MONITORADAS` — adicionada (AF league_id=253, season 2026, media_esperada=10.8) + `LIGAS_MEDIA_CARTOES[253]=4.0`. Rebuild + restart: discovery matchou `event_id=81380286 → fixture_id=1490304 confidence=1.00`.
+- Smoke real end-to-end via worker (jogo já em min ~84, fora do gate <=5 — captura forçada com minute=3 sintético):
+  - RUN 1 (`capture_if_needed minute=3`): inserted=2 ✅
+  - RUN 2 (cache hit): inserted=0, sem provider call ✅
+  - RUN 3 (cache cleared, `repo.exists`): inserted=0, sem provider call ✅
+  - RUN 4 (fixture novo, `minute=99`): inserted=0, **cache NÃO marcado** (fix VAL 4 confirmado em produção) ✅
+- DB final: `fixture_id=1490304, source=bridge_betano`, home `4-2-3-1` 11+9, away `4-1-4-1` 11+9, coach=None, version=4521. Zero duplicatas via UNIQUE.
+- **Caminho A soft Fase G PLENAMENTE entregue.**
+
 ---
 
 ## 2026-05-17 — Fase G.0: Investigação técnica lineups Betano + validação renewer
