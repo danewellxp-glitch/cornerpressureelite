@@ -17,6 +17,40 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-17 — PRIORIDADE 4-B: cache stale TTL adaptativo + AF removido runtime odds
+
+**Contexto:** Decisão D4 aprovada — ZERO AF no path runtime de odds. Cache stale assume quando bridge falha; cache expirado = sinal bloqueado (sistema silente em outage extremo). AF continua em discovery + cold checks.
+
+**O que foi feito (4 commits):**
+
+- `9ca3481` — migration `0009_odds_stale_tracking.sql` (is_stale BOOL + source_age_seconds INT idempotente, index parcial). `OddsCache` com TTL adaptativo D1 (corners/cards 30s, goals 20s, match_winner 15s). `CanonicalOverUnder` + `OddsHistoryEntry` ganham campos stale (back-compat). 11 tests cache.
+- `13b1658` — `CachedBetanoOddsProvider`: wrapper sem AF (fresh bridge → cache fresh → cache stale → None outage). Reconnect agressivo no `BetanoBridgeClient.event_state` (4 attempts ~3.5s, backoff [0, 0.5, 1, 2]). Log `bridge.event_state.recovered` quando retry resgata. 9 tests cached.
+- `866bf7d` — factory wire via flag `REMOVE_AF_FROM_ODDS_RUNTIME` (default OFF). `JogoAoVivo` ganha `odds_is_stale`/`odds_age_seconds` (corners + cartoes). Gate em `main.py`: `if jogo.odds_is_stale: log + skip send_signal + skip DM + skip registrar_sinal`. Aplicado pra corners (linha 1371) e cards (linha 1439).
+- `(esta sessão)` — fix bug `name="betano_bridge_cached"` → `"betano_bridge"`: `CompositeOddsProvider._dispatch` só passa contexto rico (incluindo `persist_telemetry=True`) pra providers com nome exato `"betano_bridge"`. Sem o fix, persist em `odds_history` quebra silente.
+
+**Smoke real (em produção pós-cutover):**
+
+| Métrica | Pré-flag | Pós-flag (5min) |
+|---|---|---|
+| source=betano_bridge | 56 (100%) | 50 (100%) |
+| source=apifootball | 0 | **0** ✅ |
+| stale captures | 0 | 0 (cache se manteve fresh) |
+| `cached.outage` logs | n/a | 1 absorvido (Brave caiu antes do restart) |
+
+**Bugs encontrados:**
+- Provider `name` precisa ser exato `"betano_bridge"` pro Composite passar `persist_telemetry`. Wrapper transparente: documentei em comment do `CachedBetanoOddsProvider`.
+- Renewer 502 recorrente continua (Brave do pool stuck ~horas). Foi necessário restart manual durante o smoke. **P4 (healthcheck profundo + supervisor)** segue pendente — P4-B mitiga via cache, mas não resolve root cause.
+
+**Tests:** 47/47 verde (11 cache + 9 cached + 27 outros não-tocados). Zero regressão.
+
+**Decisões:**
+- Default OFF mantido até validação ampla — flag `REMOVE_AF_FROM_ODDS_RUNTIME=true` ligada em produção pós-smoke OK.
+- `CachedBetanoOddsProvider.name = "betano_bridge"` (transparência intencional).
+
+**Estado final:** P4-B ✅ closed. AF zero em odds runtime. P4 (renewer supervisor) continua pendente — gargalo operacional restante.
+
+---
+
 ## 2026-05-17 — PRIORIDADE 2: popular `betano_team_map` (Issue C resolvido)
 
 **Contexto:** Discovery worker logava 8 matches / 100+ events skipped por ciclo (~7-8% cobertura). Newcastle, West Ham, Bologna FC, Athletic Bilbao, Celta Vigo e outros não estavam mapeados Betano↔AF — fallback 100% AF pra esses jogos. Bloqueador implícito também pro SofaScore Event Resolver (que depende de AF teams pra fuzzy match com SofaScore).

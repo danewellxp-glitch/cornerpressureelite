@@ -30,9 +30,15 @@ log = logging.getLogger("cpes.providers.betano_bridge.cached")
 
 
 class CachedBetanoOddsProvider:
-    """Wrap BetanoBridgeOddsAdapter + OddsCache, sem AF."""
+    """Wrap BetanoBridgeOddsAdapter + OddsCache, sem AF.
 
-    name = "betano_bridge_cached"
+    Importante: `name = "betano_bridge"` (não cached!) — CompositeOddsProvider
+    decide passar contexto rico (incluindo persist_telemetry) apenas pra
+    providers com nome exato "betano_bridge". Se renomearmos, persist quebra
+    silenciosamente.
+    """
+
+    name = "betano_bridge"
 
     def __init__(self, adapter, cache: OddsCache):
         self._adapter = adapter
