@@ -1376,12 +1376,27 @@ class CornerPressureElite:
                 # é melhor que sinal errado). Sinal ainda registra em odds_history
                 # via persist_telemetry no get_corners; aqui apenas suprimimos
                 # broadcast + DM + insert em `sinais`.
+                refetch_ok = True
                 if jogo.odds_is_stale:
                     logger.warning(
                         f"signal.blocked_stale corners fixture={fixture_id} "
                         f"age={jogo.odds_age_seconds}s source={jogo.odds_source}"
                     )
-                elif not self.state_manager.ja_alertou(fixture_id):
+                    refetch_ok = False
+                elif config.ODDS_REFETCH_BEFORE_EMIT and USE_BETANO_BRIDGE:
+                    # Fidelidade: refetch just-before-send — captura fresh, valida
+                    # linha+drift. Bridge cache 3s, geralmente cache hit (sem custo).
+                    from engine.odds_refetch import refetch_validate_corners
+                    refetch_ok = await refetch_validate_corners(
+                        self.composite_odds, canonical_fixture, score, jogo,
+                        max_drift_pct=config.ODDS_REFETCH_MAX_DRIFT_PCT,
+                    )
+                    if not refetch_ok:
+                        logger.warning(
+                            f"signal.blocked_refetch corners fixture={fixture_id} "
+                            f"— odds mudaram entre captura e envio"
+                        )
+                if refetch_ok and not self.state_manager.ja_alertou(fixture_id):
                     # 1) Broadcast pro grupo (mensagem genérica)
                     await self.notifier.send_signal(sinal)
                     # 2) DM per-user filtrado por tier + plano (com prefixo da estratégia)
@@ -1471,6 +1486,18 @@ class CornerPressureElite:
                                     f"age={jogo.odds_age_seconds_cartoes}s source={jogo.odds_source_cartoes}"
                                 )
                                 sinal_cartoes = None  # bloqueia restante do bloco abaixo
+                            elif config.ODDS_REFETCH_BEFORE_EMIT and USE_BETANO_BRIDGE:
+                                from engine.odds_refetch import refetch_validate_cards
+                                refetch_ok_cards = await refetch_validate_cards(
+                                    self.composite_odds, canonical_fixture, score, jogo,
+                                    max_drift_pct=config.ODDS_REFETCH_MAX_DRIFT_PCT,
+                                )
+                                if not refetch_ok_cards:
+                                    logger.warning(
+                                        f"signal.blocked_refetch cards fixture={fixture_id} "
+                                        f"— odds mudaram entre captura e envio"
+                                    )
+                                    sinal_cartoes = None
                         if sinal_cartoes:
                             # Cartões só para plano max (ou admin)
                             cards_users = [

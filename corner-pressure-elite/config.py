@@ -241,6 +241,14 @@ USE_NEW_MARKETS_ROUTE = os.getenv("USE_NEW_MARKETS_ROUTE", "false").lower() == "
 # (sistema silente em outage extremo, decisão D4 aprovada). AF continua em uso
 # pra discovery + cold checks. Default OFF até smoke validar.
 REMOVE_AF_FROM_ODDS_RUNTIME = os.getenv("REMOVE_AF_FROM_ODDS_RUNTIME", "false").lower() == "true"
+
+# Fase K — fidelidade sinal (2026-05-17): antes do envio WhatsApp, refetch
+# odds Betano via bridge. Se odd mudou >ODDS_REFETCH_MAX_DRIFT_PCT (15% default)
+# OU linha mudou OU adapter retornou stale/None, ABORTA emit (silêncio é melhor
+# que sinal errado, mesma filosofia D4). Bridge tem cache 3s, então refetch
+# dentro do TTL é instantâneo.
+ODDS_REFETCH_BEFORE_EMIT = os.getenv("ODDS_REFETCH_BEFORE_EMIT", "true").lower() == "true"
+ODDS_REFETCH_MAX_DRIFT_PCT = float(os.getenv("ODDS_REFETCH_MAX_DRIFT_PCT", "0.15"))
 BETANO_BRIDGE_URL = os.getenv("BETANO_BRIDGE_URL", "http://localhost:8080")
 # Pós-otimização Fase 2a.1 o bridge faz ~9-12s/consulta; margem pra timeout total.
 BETANO_BRIDGE_TIMEOUT_SEC = float(os.getenv("BETANO_BRIDGE_TIMEOUT_SEC", "25.0"))
