@@ -72,8 +72,46 @@ TODOs registrados durante fases anteriores (consolidar em sprint dedicado):
 
 ## Fases Caminho A hard (eliminar AF completamente)
 
-### Fase J — Descontinuar API-Football (~2h)
+### Fase K — Descontinuar API-Football (~2h)
 Quando F+G+H entregues e estáveis, remove `APIFootballClient` do orquestrador.
+(Renumerada de J pra K — Fase J realocada pra Pré-jogo + Estudo de Times, ver seção On Hold.)
+
+## On Hold
+
+### Fase J — Pré-jogo + Estudo de Times (~75-105h, 3-4 sprints)
+
+**Status:** aprovada conceitualmente, aguarda fundação. Mapeamento em andamento com colaborador externo (2026-05-17).
+
+**Objetivo:** trazer análises pré-jogo estilo SportyTrader pro dashboard CPES + página de estudo de times. Diferencial competitivo vs tipsters genéricos: análise embasada no próprio dataset capturado (E.1 + F + G).
+
+**Escopo:**
+1. **Página "Análise Pré-Jogo" por fixture** — últimos N jogos cada time (casa/fora), H2H histórico, palpite principal com confiança %, lista de palpites secundários, estatísticas resumidas, texto narrativo (template + AI leve opcional).
+2. **Página "Estudo de Times"** — performance casa vs fora, padrões detectados (queries pré-computadas), histórico H2H matriz, próximos jogos com palpites, gráficos temporais.
+3. **Importação histórico AF** (10-15h) — 2-3 temporadas das ligas monitoradas, popula tabelas existentes, ~1000-3000 jogos por liga.
+4. **Heurística de palpite** (15-25h) — cálculo de confiança via regras, pré-computado (não em tempo real), atualiza a cada novo jogo capturado.
+5. **Texto narrativo** — opção (a) templates puros, zero AI; opção (b) AI leve (Claude Haiku) ~$30/mês.
+
+**Pré-requisitos:**
+- Fase H entregue (AF residual)
+- Fase I entregue (otimização)
+- V2 Dashboard entregue (Minhas Apostas + Banca)
+- Dataset com 4-6 semanas de captura própria + import histórico AF
+
+**Por que ON HOLD:**
+- V2 Dashboard tem prioridade pra monetização Max R$89,90
+- Caminho A soft precisa fechar primeiro (Fase H, I)
+- Dataset precisa amadurecer
+- 75-105h é peça grande, merece sequenciamento dedicado
+
+**Retomar quando:**
+- Primeiros 50+ clientes Pro/Max ativos
+- Caminho A soft completo
+- Dataset estável > 1000 jogos capturados
+
+**Valor comercial esperado:**
+- Tier Pro: análises básicas (templates simples)
+- Tier Max: análises premium (AI texto + padrões avançados)
+- Potencial novo tier "Quant Pro" R$199,90: estudo de times completo + todas análises + export de dados
 
 ## Fases Quant (longo prazo)
 
