@@ -25,6 +25,7 @@ import {
     fetchBancaMovements,
     fetchBancaSeries,
     setupBanca,
+    deleteBanca,
     addBancaMovement,
     resetBanca,
     type BancaSummary,
@@ -53,7 +54,7 @@ function brl(cents: number | null | undefined): string {
     });
 }
 
-type ModalKind = "deposit" | "withdraw" | "correction" | "reset" | "edit_initial" | null;
+type ModalKind = "deposit" | "withdraw" | "correction" | "reset" | "edit_initial" | "delete_all" | null;
 
 export default function BancaPanel() {
     const [summary, setSummary] = useState<BancaSummary | null>(null);
@@ -184,10 +185,17 @@ export default function BancaPanel() {
                     </button>
                     <button
                         onClick={() => setModal("reset")}
-                        className="flex items-center gap-2 rounded-xl border border-border hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive text-muted-foreground px-4 py-3 text-sm font-medium transition"
+                        className="flex items-center gap-2 rounded-xl border border-border hover:border-warning/40 hover:bg-warning/10 hover:text-warning text-muted-foreground px-4 py-3 text-sm font-medium transition"
                     >
                         <RotateCcw className="size-4" />
-                        Resetar
+                        Resetar (zera ao inicial)
+                    </button>
+                    <button
+                        onClick={() => setModal("delete_all")}
+                        className="flex items-center gap-2 rounded-xl border border-border hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive text-muted-foreground px-4 py-3 text-sm font-medium transition"
+                    >
+                        <RotateCcw className="size-4 rotate-180" />
+                        Deletar tudo
                     </button>
                 </div>
             </section>
@@ -541,8 +549,9 @@ function MovementModal({
         deposit: { title: "Adicionar saldo", cta: "Confirmar depósito" },
         withdraw: { title: "Sacar saldo", cta: "Confirmar saque" },
         correction: { title: "Correção manual", cta: "Aplicar correção", helper: "Use sinal de menos pra subtrair (ex: -50,00)" },
-        reset: { title: "Resetar banca", cta: "Resetar agora" },
+        reset: { title: "Resetar banca", cta: "Resetar agora", helper: "Zera o saldo pro valor inicial. Movements ficam." },
         edit_initial: { title: "Editar banca inicial", cta: "Salvar" },
+        delete_all: { title: "Deletar banca completamente", cta: "DELETAR TUDO", helper: "Remove banca + todos os movements. Volta a estado 'não configurada'. Irreversível." },
     };
     const m = labels[kind];
 
@@ -552,6 +561,8 @@ function MovementModal({
         try {
             if (kind === "reset") {
                 await resetBanca(motivo.trim() || undefined);
+            } else if (kind === "delete_all") {
+                await deleteBanca();
             } else {
                 const n = parseFloat(valor.replace(",", "."));
                 if (Number.isNaN(n) || n === 0) {
@@ -588,7 +599,7 @@ function MovementModal({
                 </div>
 
                 <div className="p-5 space-y-4">
-                    {kind !== "reset" && (
+                    {kind !== "reset" && kind !== "delete_all" && (
                         <label className="block">
                             <span className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase block mb-1">
                                 Valor (R$)
@@ -608,6 +619,11 @@ function MovementModal({
                                 </span>
                             )}
                         </label>
+                    )}
+                    {kind === "delete_all" && m.helper && (
+                        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+                            {m.helper}
+                        </div>
                     )}
 
                     <label className="block">
@@ -642,7 +658,7 @@ function MovementModal({
                         disabled={busy}
                         className={cn(
                             "px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2",
-                            kind === "reset"
+                            kind === "reset" || kind === "delete_all"
                                 ? "border border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20"
                                 : "bg-mint/20 border border-mint/40 text-mint-bright hover:bg-mint/30",
                             "disabled:opacity-50 disabled:cursor-not-allowed",

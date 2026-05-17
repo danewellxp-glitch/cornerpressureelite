@@ -871,3 +871,13 @@ export const resetBanca = (motivo?: string) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ motivo: motivo ?? null }),
   });
+
+/**
+ * Wipe completo: deleta banca + todos movements. Diferente de resetBanca
+ * que só zera saldo pro inicial. Use quando user quer recomeçar do zero
+ * (re-setup com valor diferente, sair da feature, etc.).
+ */
+export const deleteBanca = () =>
+  apiFetch<{ deleted: boolean; configured: false }>("/banca", {
+    method: "DELETE",
+  });

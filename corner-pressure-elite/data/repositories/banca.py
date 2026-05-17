@@ -248,6 +248,16 @@ class BancaRepo:
             for d, s in sorted(per_day.items())
         ]
 
+    async def delete(self, user_id: int) -> bool:
+        """Wipe completo: deleta banca + todos movements. Volta a 'nao configurada'.
+
+        Diferente de reset() que so zera o saldo mantendo a config.
+        """
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute("DELETE FROM banca_movements WHERE user_id = $1", user_id)
+            result = await conn.execute("DELETE FROM banca WHERE user_id = $1", user_id)
+        return "DELETE 1" in result
+
     async def reset(self, user_id: int, motivo: Optional[str] = None) -> dict:
         """Zera saldo p/ banca_inicial_cents e registra movement de reset."""
         async with self._pool.acquire() as conn, conn.transaction():

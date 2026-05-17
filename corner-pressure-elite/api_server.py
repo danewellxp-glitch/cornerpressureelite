@@ -2206,6 +2206,18 @@ async def api_banca_reset(
         raise HTTPException(409, "banca nao configurada")
 
 
+@app.delete("/api/banca")
+async def api_banca_delete(current_user: User = Depends(require_paid_subscription)):
+    """Wipe completo: deleta banca + movements. Volta a estado 'nao configurada'.
+
+    Diferente do reset que so zera saldo. Usar quando user quer
+    recomecar do zero (re-setup com valor diferente, por exemplo).
+    """
+    repo = await _get_banca_repo()
+    deleted = await repo.delete(current_user.id)
+    return {"deleted": deleted, "configured": False}
+
+
 # ============= User signal decisions (Sprint M) =============
 
 from data.repositories.user_signal_decisions import UserSignalDecisionsRepo  # noqa: E402
