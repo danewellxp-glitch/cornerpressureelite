@@ -26,6 +26,7 @@ Fases planejadas + estado atual. Atualizado quando fase fecha ou nova é planeja
 
 ## Em progresso
 
+- **Fase K.0 entregue** — Investigação SofaScore confirmou CASO α via `curl_cffi` (10/10 endpoints 200 OK, 47 req/s sustentado, coach via `/managers`, lesões via `lineups.missingPlayers`, standings ricos). Doc + ADR em branch `feat/sofascore-integration`. Aguarda revisão Daniel pra K.1.
 - **Smoke real Fase G.1** — Validar captura `lineups_history` em jogo live com `minute<=5` (próximo lote 2026-05-17 10:30 BRT+)
 - **Smoke real D.0 + D.2** — Validar telemetria + matches em jogo de liga monitorada ao vivo (pendente overlap real)
 
@@ -70,9 +71,13 @@ TODOs registrados durante fases anteriores (consolidar em sprint dedicado):
 
 ## Fases Caminho A hard (eliminar AF completamente)
 
-### Fase K — Descontinuar API-Football (~2h)
-Quando F+G+H entregues e estáveis, remove `APIFootballClient` do orquestrador.
-(Renumerada de J pra K — Fase J realocada pra Pré-jogo + Estudo de Times, ver seção On Hold.)
+### Fase K — SofaScore como fallback + dataset extra (~25-35h)
+- K.0 investigação ✅ entregue (CASO α via `curl_cffi`).
+- K.1 implementação: 3 adapters Composite (stats/events/lineups com SofaScore fallback) + extensão `CanonicalLineup` (coach + missing_players) + workers novos (standings + team-form + best-players) + ~30 testes + smoke.
+- Após K.1 estável: Fase M descontinua `APIFootballClient` runtime (residual em discovery/FT cross-check).
+
+### Fase M — Descontinuar API-Football do runtime quente (~2h)
+Quando K + H + I entregues e estáveis, remove `APIFootballClient` do runtime quente. AF residual: `get_today_schedule` (1 req/liga/dia) + cross-check FT (cold path).
 
 ## On Hold
 

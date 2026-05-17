@@ -44,3 +44,4 @@ nul
 mitmweb-*.log
 har_export_*.json
 betano-capture-*.json
+sofa-*.har

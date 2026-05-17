@@ -239,6 +239,40 @@ Schema completo + cobertura comparativa em [`architecture/betano-stats-api.md`](
 **Status:** ATIVA, implementação E.1 pendente.
 
 
+## 2026-05-17 — Fase K.0 SofaScore como fallback / dataset extra (CASO α via `curl_cffi`)
+
+**Contexto:** Após G.1 entregue (Caminho A soft ~75%), restava decidir como tratar a residual dependência de API-Football no fallback de stats/events/lineups (E.1, F, G.1 todos têm AF como segundo Composite). AF está sem créditos no momento (CLAUDE.md §10) → pipeline depende de provedor sem garantia operacional. Fase K.0 investiga SofaScore como **substituto do fallback AF + fonte de dados novos** (standings, lesões, coach, gráficos temporais).
+
+**Decisão:** **CASO α puro — `curl_cffi` impersonate Chrome direto via aiohttp adapter, sem bridge.**
+
+SofaScore bloqueia clientes Python (`requests`/`aiohttp`/`curl` simples) via TLS fingerprint (JA3) — 403 Varnish uniforme. Browser real passa normal. Solução: lib `curl_cffi` (Python wrapper para `libcurl-impersonate-chrome`) replica TLS handshake de Chrome. **10/10 endpoints testados respondem 200 OK do servidor CPES com IP residencial bloqueado por curl simples.**
+
+Detalhes técnicos completos em [`architecture/sofascore-api.md`](architecture/sofascore-api.md). Resumo:
+
+- **Anti-bot bypass:** `cr.get(url, impersonate='chrome120')` em vez de `requests.get(url)`. Zero infra adicional, lib instalável via pip.
+- **Rate limit:** 70 reqs em 1.5s = 47 req/s sem 429 (sustentado). Margem >150× sobre uso CPES (~0.3 req/s).
+- **Cobertura:** 31 endpoints validados via HAR. Stats por **período** (1H/2H/ALL), `coach_name` via `/managers` dedicado (★ resolve gap Betano), `missingPlayers` (★ lesões+suspensões no `/lineups`), standings completa com `promotion` (Libertadores/relegation), team-performance-graph temporal, pregame-form, best-players, average-positions, win-probability graph.
+
+**Alternativas consideradas:**
+- **CASO β — bridge dedicado com Chrome real:** rejeitado — `curl_cffi` resolve sem browser. Bridge adiciona ~25h dev + custos operacionais (renewer warmup, pool, etc).
+- **CASO γ — proxy residencial rotativo:** rejeitado — IP não é o problema (Daniel acessou normal do mesmo IP via Firefox). Custo $10-50/mês desnecessário.
+- **Manter AF como fallback:** rejeitado — chave AF expira, sem créditos no momento, custo recorrente $50/mês, pipeline cego quando AF down. SofaScore é grátis.
+
+**Trade-offs:**
+- ✅ Zero infra adicional (curl_cffi via pip, igual qualquer lib Python).
+- ✅ Resolve gap Betano (coach, lesões, standings) + adiciona dados novos (best-players, pregame-form, performance-graph).
+- ✅ Stats RICAS por período (1H/2H/ALL × 7 grupos) — superior a Betano e AF.
+- ✅ Brasileirão + MLS + Premier todos cobertos (samples validados).
+- ❌ Dependência de `libcurl-impersonate-chrome` binário no container (1 linha Dockerfile, comum em data-scraping).
+- ❌ Risco SofaScore atualizar JA3 → trocar versão impersonate (chrome116 → chrome124 etc).
+- ❌ Sem endpoint dedicado `/injuries` por time (vem via `/lineups.missingPlayers`, escopo: jogo).
+
+**Estimativa Fase K.1:** 25-35h em ~5 sessões. Worker novo (standings) + 3 adapters Composite (stats/events/lineups com SofaScore fallback) + extensão `CanonicalLineup` (coach_name + missing_players) + ~30 testes + smoke.
+
+**Status:** APROVADA pendente revisão. Implementação K.1 a iniciar quando Daniel der go.
+
+---
+
 ## 2026-05-17 — Fase G.1 lineups Betano via `event.roster` (CASO α puro)
 
 **Contexto:** Fase G originalmente prevista pra investigar endpoint dedicado

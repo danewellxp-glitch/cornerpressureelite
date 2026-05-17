@@ -17,6 +17,44 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-17 — Fase K.0: Investigação SofaScore API (CASO α via curl_cffi)
+
+**Contexto:** Caminho A soft ~75% (D.0→G.1 entregues). Fallback dos 3 Composites E.1/F/G ainda é AF — sem créditos no momento (CLAUDE.md §10). Fase K planeja substituir AF runtime por SofaScore (estável, grátis, dados ricos).
+
+**O que foi feito (sem código de produção — só investigação + docs):**
+
+**Setup:** branch `feat/sofascore-integration` criada partindo de `feat/betano-bridge-adapter` (commit `cabcbc4`).
+
+**Bloqueio descoberto:** curl simples do servidor CPES retorna 403 Varnish em todos endpoints (incluindo `/`), mesmo com headers de browser real (Firefox 120, Chrome, Origin/Referer corretos). Daniel acessa SofaScore normal no PC dele (mesmo IP residencial). Conclusão: bloqueio **TLS fingerprint (JA3)**, não IP.
+
+**Captura via mitmproxy:** Daniel rodou mitmweb no PC dele, configurou Firefox com proxy, navegou SofaScore (sequência: livescore → jogo MLS → stats → lineups → H2H → standings Brasileirão → time → matches → squad). Capturou 3179 requests no HAR (89MB, parcialmente truncado, recuperados 3179 via streaming ijson → `sofa-fixed.har`).
+
+**Análise HAR:** 1495 requests a `www.sofascore.com/api/v1/*` — 995 status 200, 370 status 304 cache, 130 status 404 (endpoints inválidos pra eventos específicos). Zero erros anti-bot. 134 paths únicos. 31 endpoints chave extraídos como samples (`/tmp/sofa-samples/*.json`).
+
+**Bypass validado:** lib `curl_cffi` (Python wrapper para `libcurl-impersonate-chrome`) com `impersonate='chrome120'` passa 200 OK do servidor CPES no IP residencial que bloqueia curl simples. **10/10 endpoints testados respondem 200 OK direto.**
+
+**Stress test:** 70 reqs sequenciais em 1.5s = 47 req/s — zero 429/403. Margem >150× sobre uso CPES atual (~0.3 req/s). SofaScore aberto pra volume real.
+
+**Descobertas críticas:**
+- **Coach resolvido:** endpoint dedicado `/event/{id}/managers` traz `homeManager`/`awayManager` com `name`, `id`, `slug`. Resolve gap `BETANO_GAPS_LINEUPS = {coach_name}`.
+- **Lesões/suspensões via `lineups.missingPlayers[]`:** `type` ∈ {missing, doubtful}, `reason` (numérico — mapping K.1), `expectedEndDate`. Schema mais rico que AF /injuries.
+- **Stats por período:** `/statistics` traz 3 períodos (1ST, 2ND, ALL) × 7 grupos (Match overview, Shots, Attack, Passes, Duels, Defending, Goalkeeping). Inclui `shots_on_target`, `blocked_shots`, `hit_woodwork`, `big_chances`, `xG live` — TUDO o que Betano não tem.
+- **Standings ricos:** 20 times com posição/pontos/V-E-D/GP/GC + `promotion.text="Copa Libertadores"` (Libertadores/Sul-Americana/Z4 sinalizadas).
+- **Endpoints NOVOS sem equivalente em Betano/AF:** team-performance-graph (temporal), best-players summary (ratings), pregame-form (W/D/L 5 últ), average-positions (heatmap-light), win-probability graph, AI insights pt-BR.
+
+**Decisão:** **CASO α puro** — `curl_cffi` direto, sem bridge dedicado. Documentado em [`DECISIONS.md`](DECISIONS.md) e [`architecture/sofascore-api.md`](architecture/sofascore-api.md) (~150 linhas, doc novo).
+
+**Estimativa K.1:** 25-35h em ~5 sessões — adapters Composite (stats/events/lineups) + workers novos (standings + team-form + best-players) + extensão `CanonicalLineup` (coach_name + missing_players) + ~30 testes + smoke.
+
+**Estado final:**
+- Branch `feat/sofascore-integration` pushada e isolada.
+- Doc arquitetural + ADR + samples preservados.
+- Zero código de produção tocado.
+
+**Próximos passos:** PAUSAR pra Daniel revisar estratégia K.1 (cascata, schemas, ordem de adapters). K.1 só inicia quando aprovado.
+
+---
+
 ## 2026-05-17 — Fase G.1: Lineups Betano via roster (implementação completa)
 
 **Contexto:** G.0 confirmou CASO α puro (schema em `event.roster` do `/event/<id>/state` já capturado pela E.1). G.1 implementa adapter + worker + persistência sem nova carga no renewer.
