@@ -172,6 +172,15 @@ class SofaScoreClient:
         data = await self.get("/sport/football/events/live")
         return data.get("events", []) if data else None
 
+    async def get_scheduled_events(self, date: str) -> Optional[list[dict]]:
+        """Retorna eventos agendados para uma data (YYYY-MM-DD).
+
+        Cobre passado + futuro (eventos terminados continuam acessíveis).
+        Usado pelo backfill da Fase H A1.2 (resolve fixtures historicos).
+        """
+        data = await self.get(f"/sport/football/scheduled-events/{date}")
+        return data.get("events", []) if data else None
+
     async def get_event(self, event_id: int) -> Optional[dict]:
         data = await self.get(f"/event/{event_id}")
         return data.get("event") if data else None
