@@ -17,6 +17,44 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-17 — Fase G.0: Investigação técnica lineups Betano + validação renewer
+
+**Contexto:** Antes de implementar Fase G (lineups Betano), validar (1) saúde do renewer pós smoke instável da F, (2) endpoint real do payload de lineups.
+
+**O que foi feito (zero código — só investigação + docs):**
+
+**PARTE 1 — Validação saúde renewer 24h:**
+- `stats_history` 24h: `apifootball` 46 (69.7%), `bridge_betano` 20 (30.3%). Janela curta — só ~1h de prod real (jogos sábado noite acabaram cedo + Brave warmup inicial).
+- `events_history` 24h: 100% `apifootball` (events worker entrou em ação só na janela final, antes do bridge recuperar do warmup).
+- **Teste live atual: renewer 100% saudável.** `/health` 200 OK. `/danae/live` 200 6.7s (42 events). `/danae/event/<id>/state` testado em 5 event_ids distintos (MLS, Liga 1 Peru, Liga Panamá, esports) → todos 200 OK, latência 5.5-8s, payloads válidos (versions 579-1258, scores, corners reais).
+- **Decisão go/no-go:** ✅ **GO**. Métricas históricas degradadas por janela curta, não instabilidade crônica.
+
+**PARTE 2 — Investigação endpoint lineups:**
+- Plano original previa captura via mitm no danewell. **Não foi necessário.**
+- Schema completo descoberto inspecionando `event.roster` dos payloads `/event/<id>/state` que `BridgeStatsAdapter` (E.1) **já captura a cada poll**.
+- Schema rico: `roster.homeRoster.players` (squad completo 26-38, com `shirtNumber`, `position`, `positionDisplayName` localizado pt-BR), `roster.lineups.homeLineup` (`teamId`, `formation` "5-4-1", `lineup[][]` linhas táticas, `benchPlayers[]`). Análogo `awayRoster`/`awayLineup`. `unknownPlayers` pra players sem ID Betano (UUID + name).
+- Cobertura validada em 4 ligas distintas: MLS ✅, Liga 1 Peru ✅, Liga Panamá ❌ (zero), Esoccer ❌ (zero). Mesma curva `coverage_level` Opta da E.1.
+- Gap vs AF: **coach (técnico)** — não vem no Betano roster. Ganhos vs AF: squad completo + position localizada.
+
+**Decisões:**
+- [Nova ADR em DECISIONS.md](DECISIONS.md): **CASO α puro** — extrator + persistência sobre payload já capturado. Zero novo endpoint, zero novo trabalho bridge/renewer.
+- Estimativa Fase G.1: **5h** (vs 6-10h originalmente — redução porque endpoint já está sendo consumido).
+
+**Entregáveis G.0:**
+- ✅ `docs/architecture/betano-lineups-api.md` (novo, ~150 linhas) — schema completo + cobertura comparativa + decisão técnica + limitações.
+- ✅ ADR em `docs/DECISIONS.md` "Fase G.1 lineups Betano via event.roster (CASO α puro)".
+- ✅ Métricas renewer 24h registradas nesta sessão CHANGELOG.
+- ✅ JSONs de referência preservados em `/tmp/test_*.json` (recriáveis via curl).
+
+**Estado final:**
+- Renewer **saudável** (5/5 live tests 200 OK).
+- Schema lineups Betano **mapeado** sem precisar mitm.
+- Pronto pra implementar Fase G.1 quando Daniel der go.
+
+**Próximos passos:** Fase G.1 implementação (~5h, padrão E.1/F reusado).
+
+---
+
 ## 2026-05-17 — Fase F: Eventos Betano via `event.incidents[]` (dataset puro)
 
 **Contexto:** Persistir eventos individuais (gols, cartões, escanteios, substituições, etc) capturados do `event.incidents[]` no mesmo payload `/event/<id>/state` já usado pelo `BridgeStatsAdapter` (Fase E.1). Caminho A soft progride — **dataset puro** (PASSO 0 confirmou ZERO consumidores externos de `api_client.get_events`).

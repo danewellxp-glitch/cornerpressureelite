@@ -237,3 +237,43 @@ Schema completo + cobertura comparativa em [`architecture/betano-stats-api.md`](
 **Estimativa Fase E.1 atualizada:** 6-10h (vs 10-14h originalmente). Redução porque infra D.1 já está em produção e estável.
 
 **Status:** ATIVA, implementação E.1 pendente.
+
+
+## 2026-05-17 — Fase G.1 lineups Betano via `event.roster` (CASO α puro)
+
+**Contexto:** Fase G originalmente prevista pra investigar endpoint dedicado
+de lineups (`/api/statsstream/<id>/info/aggregated/` candidato no E.0).
+Investigação G.0 (esta sessão) descobriu que **`event.roster` no payload
+`/event/<id>/state` já capturado pela Fase E.1 contém lineups completas** —
+zero novo endpoint, zero novo trabalho no bridge/renewer.
+
+**Decisão:** **CASO α puro — extrator + persistência sobre payload já capturado.**
+Worker `BetanoLineupsWorker` extrai `payload.event.roster` no parse,
+não faz nova request HTTP. Compartilha cache de version com `BridgeStatsAdapter`
+quando a otimização de cache compartilhado da Fase I for implementada.
+
+Schema completo + cobertura comparativa em [`architecture/betano-lineups-api.md`](architecture/betano-lineups-api.md).
+Resumo: `roster.lineups.{home,away}Lineup` traz `formation` (string ex `"5-4-1"`) +
+`lineup[][]` (linhas táticas) + `benchPlayers[]`. `roster.{home,away}Roster.players`
+traz **squad completo** (26-38 jogadores) com `shirtNumber`, `position` (GK/DF/MF/FW)
+e `positionDisplayName` localizado pt-BR.
+
+**Alternativas consideradas:**
+- **CASO α — endpoint dedicado `/api/statsstream/<id>/info/aggregated/`** — investigado mas redundante (mesmo subconjunto de dados que `event.roster`). Não justifica request HTTP extra.
+- **CASO β (HTML parsing)** — descartado: dados existem em API.
+- **API-Football mantido como primário** — descartado por consistência com E.1/F.
+
+**Trade-offs:**
+- ✅ Zero nova request HTTP — reusa payload que worker E.1 já busca a cada poll.
+- ✅ Schema rico: formation + lineup tática + bench + squad completo.
+- ✅ Coverage idêntica à E.1 (mesma fonte Opta) — ligas profissionais OK, ligas pequenas/esports zero.
+- ✅ `positionDisplayName` localizado em PT-BR (AF não tem).
+- ❌ **Coach (técnico) não vem.** AF tem. Gap aceitável pra MVP (decision_engine não consome; H2-H4 podem usar formation+XI qualidade).
+- ❌ Não distingue lineup `confirmed` vs `presumed`. Mitigação: polling continua + UNIQUE com `captured_at` permite múltiplos snapshots.
+- ❌ `unknownPlayerId` (UUID local) em players sem ID Betano — persistir como `player_id=NULL`.
+
+**Estimativa Fase G.1 atualizada:** 5h (vs 6-10h originalmente). Redução
+porque endpoint já está sendo consumido — só precisa novo extrator +
+schema novo + worker + ~15 testes.
+
+**Status:** APROVADA pendente revisão, implementação G.1 a iniciar quando Daniel der go.
