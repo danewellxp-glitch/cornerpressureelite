@@ -88,8 +88,10 @@ class BetanoLineupsWorker:
                 "betano_lineups_worker.skip_late fixture=%d minute=%d max=%d",
                 fixture_id, minute, self._max_minute,
             )
-            # Marca como "captured" pra não bater no repo todo poll.
-            self._captured.add(fixture_id)
+            # NÃO marca cache: se minute vier com spike transiente (bug de
+            # parsing, race no recálculo), próximo poll com valor correto
+            # ainda tem chance de capturar. Custo: repo.exists_for_fixture
+            # extra por poll desses fixtures (1 query barata).
             return 0, 0
 
         try:
