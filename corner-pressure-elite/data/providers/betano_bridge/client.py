@@ -207,32 +207,41 @@ class BetanoBridgeClient:
 
         Retorna o JSON `{captured_at, event_id, version, from_cache, data: {...}}`.
 
+        P4-B (2026-05-17): reconnect agressivo — 4 tentativas em ~3.5s total
+        com backoff [0, 0.5, 1.0, 2.0]s. Pega rapidamente recuperação
+        transitória do renewer (Brave stuck pode resolver em 1-3s); se
+        persiste, cai pro cache stale do CachedBetanoOddsProvider.
+
         Levanta:
           - `BridgeUnavailable` se rede falha ou HTTP >= 500
           - `BridgeTimeout` se o tempo total excede `timeout_sec`
           - `BridgeMarketNotFound` se HTTP 404 (event não existe)
         """
+        import asyncio
         client = await self._ensure_client()
 
-        attempts = self._retries + 1
+        # P4-B: 4 attempts (0s, 0.5s, 1s, 2s entre) — total ~3.5s
+        backoff = [0.0, 0.5, 1.0, 2.0]
         last_timeout: Optional[Exception] = None
         last_unavailable: Optional[Exception] = None
 
-        for attempt in range(1, attempts + 1):
+        for attempt, delay in enumerate(backoff, start=1):
+            if delay > 0:
+                await asyncio.sleep(delay)
             try:
                 response = await client.get(f"/event/{event_id}/state")
             except httpx.TimeoutException as e:
                 last_timeout = e
                 log.warning(
                     "bridge.event_state.timeout attempt=%d/%d event_id=%s",
-                    attempt, attempts, event_id,
+                    attempt, len(backoff), event_id,
                 )
                 continue
             except httpx.RequestError as e:
                 last_unavailable = e
                 log.warning(
                     "bridge.event_state.unreachable attempt=%d/%d event_id=%s err=%s",
-                    attempt, attempts, event_id, e,
+                    attempt, len(backoff), event_id, e,
                 )
                 continue
 
@@ -243,19 +252,24 @@ class BetanoBridgeClient:
                 last_unavailable = BridgeUnavailable(f"HTTP {response.status_code}")
                 log.warning(
                     "bridge.event_state.server_error attempt=%d/%d status=%d",
-                    attempt, attempts, response.status_code,
+                    attempt, len(backoff), response.status_code,
                 )
                 continue
 
             response.raise_for_status()
+            if attempt > 1:
+                log.info(
+                    "bridge.event_state.recovered attempt=%d event_id=%s",
+                    attempt, event_id,
+                )
             return response.json()
 
         if last_timeout is not None:
             raise BridgeTimeout(
-                f"bridge timeout após {attempts} tentativas event_id={event_id}"
+                f"bridge timeout após {len(backoff)} tentativas event_id={event_id}"
             ) from last_timeout
         raise BridgeUnavailable(
-            f"bridge unreachable após {attempts} tentativas event_id={event_id}"
+            f"bridge unreachable após {len(backoff)} tentativas event_id={event_id}"
         ) from last_unavailable
 
     async def health(self) -> dict:
