@@ -372,3 +372,10 @@ SOFASCORE_IMPERSONATE = os.getenv("SOFASCORE_IMPERSONATE", "chrome120")
 # Setar 0 quando confiança no SofaScore alta. Discovery + cross-check FT
 # continuam usando AF independente desta flag (cold path).
 AF_SUPER_RESIDUAL_ENABLED = os.getenv("AF_SUPER_RESIDUAL_ENABLED", "true").lower() == "true"
+
+# Enrichment toggle (K.1 B.7): quando Betano primary devolve stats/lineups
+# com gaps conhecidos (BETANO_GAPS_STATS / BETANO_GAPS_LINEUPS), Composite
+# chama SofaScore em paralelo pra preencher. Falha do enrichment NÃO
+# derruba primary. Default ON; setar 'false' pra desligar se causar
+# pressão indevida na API SofaScore.
+ENABLE_SOFASCORE_ENRICHMENT = os.getenv("ENABLE_SOFASCORE_ENRICHMENT", "true").lower() == "true"

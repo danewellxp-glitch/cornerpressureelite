@@ -22,7 +22,7 @@ preenchido. Workers/consumers downstream tratam `None` graciosamente.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Optional, Protocol, runtime_checkable
 
@@ -135,14 +135,27 @@ class CompositeLineupsProvider:
     Diferente do `CompositeEventsProvider`: lá `[]` = sucesso. Aqui lineups
     sem starting_eleven = cobertura zero, cai pra fallback. Coach faltando
     NÃO aciona fallback (gap conhecido).
+
+    K.1 PARTE B.7: quando `enricher` injetado, lineups do primary com
+    `coach_name=None` e/ou `missing_players=[]` (BETANO_GAPS_LINEUPS) são
+    enriquecidos via chamada paralela ao enricher (SofaScore). Falha do
+    enrichment NÃO derruba primary.
     """
 
     name = "composite_lineups"
 
-    def __init__(self, providers: list[LineupsProvider]):
+    def __init__(
+        self,
+        providers: list[LineupsProvider],
+        *,
+        enricher: Optional[LineupsProvider] = None,
+        enable_enrichment: bool = True,
+    ):
         if not providers:
             raise ValueError("CompositeLineupsProvider precisa de >=1 provider")
         self._providers = list(providers)
+        self._enricher = enricher
+        self._enable_enrichment = enable_enrichment
 
     async def get_lineups(
         self,
@@ -194,8 +207,74 @@ class CompositeLineupsProvider:
                 "composite_lineups.hit provider=%s fixture=%d sides=%d",
                 p.name, fixture_id, len(lineups),
             )
+            # Enrichment opcional: coach + missing_players (BETANO_GAPS_LINEUPS).
+            if (
+                self._enable_enrichment
+                and self._enricher is not None
+                and p.name != self._enricher.name
+            ):
+                lineups = await self._try_enrich(
+                    lineups, fixture_id,
+                    betano_event_id=betano_event_id,
+                    home_team_id=home_team_id,
+                )
             return lineups
         return None
+
+    async def _try_enrich(
+        self,
+        primary_lineups: list[CanonicalLineup],
+        fixture_id: int,
+        *,
+        betano_event_id: Optional[int] = None,
+        home_team_id: Optional[int] = None,
+    ) -> list[CanonicalLineup]:
+        """Enriquece coach_name + missing_players via enricher se primary tem gaps."""
+        needs_coach = any(ln.coach_name is None for ln in primary_lineups)
+        needs_missing = any(not ln.missing_players for ln in primary_lineups)
+        if not (needs_coach or needs_missing):
+            return primary_lineups
+
+        try:
+            enricher_lineups = await self._enricher.get_lineups(
+                fixture_id,
+                betano_event_id=betano_event_id,
+                home_team_id=home_team_id,
+            )
+        except Exception as e:
+            log.debug(
+                "composite_lineups.enrichment.failed fixture=%d err=%s",
+                fixture_id, e,
+            )
+            return primary_lineups
+        if not enricher_lineups:
+            return primary_lineups
+
+        by_side = {ln.team_side: ln for ln in enricher_lineups}
+        merged: list[CanonicalLineup] = []
+        any_change = False
+        for ln in primary_lineups:
+            side_match = by_side.get(ln.team_side)
+            if side_match is None:
+                merged.append(ln)
+                continue
+            kwargs: dict = {}
+            if ln.coach_name is None and side_match.coach_name:
+                kwargs["coach_name"] = side_match.coach_name
+            if not ln.missing_players and side_match.missing_players:
+                kwargs["missing_players"] = list(side_match.missing_players)
+            if kwargs:
+                any_change = True
+                merged.append(replace(ln, **kwargs))
+            else:
+                merged.append(ln)
+
+        if any_change:
+            log.debug(
+                "composite_lineups.enriched fixture=%d enricher=%s sides=%d",
+                fixture_id, self._enricher.name, len(merged),
+            )
+        return merged
 
     async def healthcheck(self) -> bool:
         for p in self._providers:
