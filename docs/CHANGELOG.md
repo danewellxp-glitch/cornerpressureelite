@@ -17,6 +17,33 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-17 — P4 monitoring 36h (decisão informada P4 PARTE 1)
+
+**Contexto:** P4 quick-win (cron preventivo Brave 12h) implementado, mas P4 PARTE 1 (supervisor reativo) ainda discutível. Em vez de implementar supervisor "no escuro", aprovamos plano de **coletar 36h de telemetria** (dom + seg, alto volume jogos) e decidir baseado em dado real.
+
+**Critérios decisão pós-36h:**
+| `refetch_none` em 36h | Classificação | Ação |
+|---|---|---|
+| 0 | Cron suficiente | Fechar Fase K, marcar PARTE 1 como "futuro opcional" |
+| 1-5 | Tolerável | PARTE 1 vira "P6 opcional", agendar quando der |
+| 10+ | Urgente | PARTE 1 imediato, investigar porque cron não basta |
+
+**O que foi feito:**
+
+- `scripts/monitor_p4.sh`: snapshot 6h (Brave uptime, distribuição odds, sinais bloqueados por reason, cron Brave logs, /event/state health, fixtures ativos). Idempotente, ssh defensivo (5s timeout).
+- Crontab `0 */6 * * *` instalado pro user `daniel` (odin) — 4 snapshots/dia. 36h × 4 = 6 snapshots de validação.
+- Baseline `/tmp/p4-monitoring-baseline.txt` registrado às 18:30 BRT: 531 captures bridge / 313 AF residual (de antes do flag P4-B ON full), 0 sinais bloqueados, Brave uptime 15:52, 7 fixtures ativos.
+- Primeiro snapshot manual rodou: `/tmp/p4-monitoring-2026-05-17_19-57.log`.
+
+**Sample logs (próximas 36h):**
+- 2026-05-17 20:00, 02:00, 08:00, 14:00, 20:00 (snapshots)
+- 2026-05-18 02:00, 08:00, 14:00 (continuação)
+- Pós-execução cron Brave: 2026-05-18 04:00 (1º preventivo) + 16:00 (2º)
+
+**Decisão dia 2026-05-19 ~22:00 BRT:** consolidar logs, queries SQL agregadas, classificar e decidir P4 PARTE 1.
+
+---
+
 ## 2026-05-17 — PRIORIDADE 4 quick-win: cron preventivo Brave (mitiga renewer 502)
 
 **Contexto:** P5 amplificou dependência do renewer (out = TODOS sinais bloqueados). 3 ocorrências documentadas de Brave stuck (`fetch() TypeError: Failed to fetch`) com `/health` superficial retornando 200 mesmo durante outage. Hipótese root cause (PARTE 3 investigação read-only): JavaScript runtime accumulation em pages live da Betano após ~24-40h uptime — renderer Brave acumula handlers SignalR/Vue, `fetch()` interno via CDP começa a falhar mas CDP `/json/version` ainda responde.
