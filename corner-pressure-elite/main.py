@@ -1306,10 +1306,13 @@ class CornerPressureElite:
                         jogo.odd_atual = canonical_corners.odd_over
                         jogo.bookmaker_usado = canonical_corners.source
                         jogo.odds_source = canonical_corners.source
+                        # P4-B: propaga flags de cache stale pro gate de emit
+                        jogo.odds_is_stale = canonical_corners.is_stale
+                        jogo.odds_age_seconds = canonical_corners.age_seconds
                         logger.debug(
                             f"Odds composite para {desc}: "
                             f"linha={canonical_corners.linha} odd={canonical_corners.odd_over} "
-                            f"source={canonical_corners.source}"
+                            f"source={canonical_corners.source} stale={canonical_corners.is_stale}"
                         )
                     else:
                         # Bridge + AF ambos falharam: segue sem odds (engine
@@ -1369,7 +1372,16 @@ class CornerPressureElite:
             sinal = self.decision_engine.avaliar(jogo)
 
             if sinal:
-                if not self.state_manager.ja_alertou(fixture_id):
+                # P4-B: gate stale — odds expiradas/stale bloqueiam emit (silêncio
+                # é melhor que sinal errado). Sinal ainda registra em odds_history
+                # via persist_telemetry no get_corners; aqui apenas suprimimos
+                # broadcast + DM + insert em `sinais`.
+                if jogo.odds_is_stale:
+                    logger.warning(
+                        f"signal.blocked_stale corners fixture={fixture_id} "
+                        f"age={jogo.odds_age_seconds}s source={jogo.odds_source}"
+                    )
+                elif not self.state_manager.ja_alertou(fixture_id):
                     # 1) Broadcast pro grupo (mensagem genérica)
                     await self.notifier.send_signal(sinal)
                     # 2) DM per-user filtrado por tier + plano (com prefixo da estratégia)
@@ -1430,6 +1442,9 @@ class CornerPressureElite:
                                 jogo.linha_cartoes = canonical_cards.linha
                                 jogo.odd_cartoes = canonical_cards.odd_over
                                 jogo.odds_source_cartoes = canonical_cards.source
+                                # P4-B: propaga flags de cache stale pro gate de emit
+                                jogo.odds_is_stale_cartoes = canonical_cards.is_stale
+                                jogo.odds_age_seconds_cartoes = canonical_cards.age_seconds
                             else:
                                 logger.warning(
                                     f"composite.get_cards retornou None para {desc} "
@@ -1448,6 +1463,14 @@ class CornerPressureElite:
                         # Avaliacao completa: agora com odds populadas.
                         sinal_cartoes = self.cards_decision_engine.avaliar(jogo)
 
+                        if sinal_cartoes:
+                            # P4-B: gate stale — análogo a corners
+                            if jogo.odds_is_stale_cartoes:
+                                logger.warning(
+                                    f"signal.blocked_stale cards fixture={fixture_id} "
+                                    f"age={jogo.odds_age_seconds_cartoes}s source={jogo.odds_source_cartoes}"
+                                )
+                                sinal_cartoes = None  # bloqueia restante do bloco abaixo
                         if sinal_cartoes:
                             # Cartões só para plano max (ou admin)
                             cards_users = [

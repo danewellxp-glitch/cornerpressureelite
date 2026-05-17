@@ -29,6 +29,12 @@ class JogoAoVivo:
     # Fonte única quando o CompositeOddsProvider é usado (USE_BETANO_BRIDGE):
     # 'betano_bridge' | 'apifootball'. None = caminho legado multi-bookmaker.
     odds_source: Optional[str] = None
+    # P4-B (2026-05-17): flags de cache stale — bloqueia emit quando True
+    # (decision_engine não envia WhatsApp com odds stale, só persiste telemetria)
+    odds_is_stale: bool = False
+    odds_age_seconds: int = 0
+    odds_is_stale_cartoes: bool = False
+    odds_age_seconds_cartoes: int = 0
 
     # Estatisticas recentes (ultimos 10 min)
     escanteios_ultimos_10min: int = 0

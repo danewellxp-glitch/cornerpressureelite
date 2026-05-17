@@ -235,6 +235,12 @@ USE_BETANO_BRIDGE = os.getenv("USE_BETANO_BRIDGE", "false").lower() == "true"
 # scraping da rota /live/_/<id>/, que foi nuked por anti-bot Cloudflare).
 # Default OFF até smoke validar — feature flag de cutover.
 USE_NEW_MARKETS_ROUTE = os.getenv("USE_NEW_MARKETS_ROUTE", "false").lower() == "true"
+# Fase K — P4-B (2026-05-17): quando True, factory monta CachedBetanoOddsProvider
+# em vez de CompositeOddsProvider([bridge, af]). AF removido do path runtime de
+# odds — cache stale assume quando bridge falha; cache expirado = sinal bloqueado
+# (sistema silente em outage extremo, decisão D4 aprovada). AF continua em uso
+# pra discovery + cold checks. Default OFF até smoke validar.
+REMOVE_AF_FROM_ODDS_RUNTIME = os.getenv("REMOVE_AF_FROM_ODDS_RUNTIME", "false").lower() == "true"
 BETANO_BRIDGE_URL = os.getenv("BETANO_BRIDGE_URL", "http://localhost:8080")
 # Pós-otimização Fase 2a.1 o bridge faz ~9-12s/consulta; margem pra timeout total.
 BETANO_BRIDGE_TIMEOUT_SEC = float(os.getenv("BETANO_BRIDGE_TIMEOUT_SEC", "25.0"))

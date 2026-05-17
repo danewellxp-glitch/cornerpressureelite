@@ -120,16 +120,35 @@ async def build_providers(
             if bridge_stats_adapter is not None:
                 await bridge_stats_adapter.close()
 
-        log.info(
-            "providers.bridge_stack primary=betano_bridge fallback=apifootball drift=%s min_score=%d",
-            drift, min_score,
-        )
-        return (
-            CompositeOddsProvider(
+        # P4-B (2026-05-17): se flag REMOVE_AF_FROM_ODDS_RUNTIME=true, envolve
+        # bridge_odds em CachedBetanoOddsProvider (cache stale + zero AF).
+        # Senão, mantém comportamento legado [bridge_odds, af_odds].
+        remove_af = bool(getattr(settings, "REMOVE_AF_FROM_ODDS_RUNTIME", False))
+        if remove_af:
+            from .betano_bridge.cached_odds_provider import CachedBetanoOddsProvider
+            from .betano_bridge.odds_cache import OddsCache
+            odds_cache = OddsCache()
+            wrapped = CachedBetanoOddsProvider(bridge_odds, odds_cache)
+            log.warning(
+                "providers.odds_stack betano_only=true cache=adaptive_ttl af_runtime_removed=true (P4-B)"
+            )
+            composite_odds = CompositeOddsProvider(
+                [wrapped],
+                drift_check=drift,
+                persistence_worker=odds_persistence_worker,
+            )
+        else:
+            log.info(
+                "providers.bridge_stack primary=betano_bridge fallback=apifootball drift=%s min_score=%d",
+                drift, min_score,
+            )
+            composite_odds = CompositeOddsProvider(
                 [bridge_odds, af_odds],
                 drift_check=drift,
                 persistence_worker=odds_persistence_worker,
-            ),
+            )
+        return (
+            composite_odds,
             composite_stats,
             _bridge_shutdown,
         )
