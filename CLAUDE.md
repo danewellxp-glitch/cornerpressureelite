@@ -550,7 +550,40 @@ Migrations rodam idempotentes via `storage/database.py::_apply_sql_migrations` n
 - 2026-05-17 — `brave-betano.service` já tem `Restart=always` — cron preventivo é redundante; problema é degradação silenciosa
 - 2026-05-17 — Endpoint Betano `/events/<id>/latest` exige headers `X-Operator: 8` + `X-Language: 5` (sem eles retorna 200 com payload vazio)
 
-### 13.13 Pendências conhecidas pós-Fase K
+### 13.14 Sprint M (2026-05-17): Multi-tenant — Banca per-user + Decisões por sinal
+
+Cada user pago agora tem **sua própria banca** e **seu próprio dashboard** baseado nas decisões que tomou sobre cada signal. Sinais continuam gerados globalmente (1 signal serve todos), mas ROI/winrate são SO derivados de `user_signal_decisions` WHERE `decision='entered'` AND `resultado IS NOT NULL`.
+
+**Migrations novas:**
+- `0011_banca.sql` — `banca` (1:1 user, com `unit_pct`+limits), `banca_movements` (1:N, tipo `deposit|withdraw|correction|bet_win|bet_loss|bet_void|reset`, snapshot `saldo_apos_cents`, FK opcional `bet_id → user_signal_decisions.id`).
+- `0012_user_signal_decisions.sql` — `(user_id, signal_id, decision pending|entered|skipped, odd_entrada, valor_apostado_cents, resultado GREEN|RED|PUSH|VOID, payout_cents, decided_at, settled_at)`. UNIQUE(user_id, signal_id). Default pending.
+
+**Novos repos:**
+- `data/repositories/banca.py` — `BancaRepo` (setup, add_movement transacional via SELECT FOR UPDATE, list_movements paginado, series diária, reset)
+- `data/repositories/user_signal_decisions.py` — `UserSignalDecisionsRepo` (decide, settle cascata em todos entered do signal, compute_user_stats, list_signals_with_decision com auto-pending row)
+
+**Endpoints novos no `api_server.py`:**
+- GET `/api/banca`, GET `/api/banca/series?days=N`, GET `/api/banca/movements`, POST `/api/banca/setup`, POST `/api/banca/movements`, POST `/api/banca/reset`
+- POST `/api/signals/{id}/decision` (entered|skipped) — quando entered, gera movement `bet_loss` otimista debitando stake da banca
+- GET `/api/users/me/stats`, GET `/api/users/me/signals?limit=N`
+
+**Frontend (`dashboard/src/app/(authenticated)/dashboard/page.tsx`):**
+- Usa `fetchUserSignals` (não mais `fetchSignalsList` global)
+- KPIs vêm de decisions entered + resolvidos
+- Cada signal na tabela tem coluna "Decisão" interativa (botões [✓ ENTREI] [✗ PULEI] se pending; valor+odd se entered; opacity-50 se skipped)
+- `DecisionModal` pra entrar com odd+valor (pré-preenche odd do signal e valor = banca×unit_pct)
+- Banner amarelo "Configure sua banca" se !configured
+
+**Convenções:** Sinais SÃO globais (gerados por `main.py` → `sinais` table, sem user_id). Decisões PER-USER (via `user_signal_decisions` JOIN). Use sempre `_get_decisions_repo()` quando precisar de stats user-scoped no api_server.
+
+**Pendente:** Wire `UserSignalDecisionsRepo.settle(signal_id, resultado)` no `_verificar_resultados` do `main.py` (quando signal vai GREEN/RED). Sem isso, decisões `entered` ficam eternamente sem `payout_cents`.
+
+Ver:
+- `docs/CHANGELOG.md` (entrada 2026-05-17 Sprint M)
+- `docs/DECISIONS.md` (opt-in default, banca schema)
+- `docs/BUGS.md` (Banca 404, limit 2000, CF gzip SSE)
+
+### 13.15 Pendências conhecidas pós-Fase K
 
 - **P4 PARTE 1** (supervisor reativo Brave) — único item operacional crítico aberto
 - Tab leak no Brave (visto 5 tabs `betano.bet.br/` simultâneas) — investigar se é real ou artefato

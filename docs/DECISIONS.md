@@ -311,3 +311,48 @@ porque endpoint já está sendo consumido — só precisa novo extrator +
 schema novo + worker + ~15 testes.
 
 **Status:** APROVADA pendente revisão, implementação G.1 a iniciar quando Daniel der go.
+
+## 2026-05-17 — Sistema de decisão por sinal: opt-in (default = não entrou)
+
+**Contexto:** Sistema gera signals globalmente (1 signal serve TODOS os users pagos). Mas ROI/winrate per-user devem refletir SO as apostas que o user efetivamente entrou. Antes da Sprint M, stats do `/dashboard` vinham de `get_db_stats()` global — qualquer user via "76.9% winrate" mesmo nunca tendo apostado.
+
+**Decisão:** Sinal nasce em estado `pending` para cada user. User clica explicitamente em **[✓ ENTREI (odd X / valor Y)]** ou **[✗ PULEI]** pra mover de pending. Stats user-scoped contam SO decisões `entered` com resultado resolvido.
+
+**Alternativas consideradas:**
+- **(B) Opt-OUT (default = entrou):** Sinais auto-confirmados; user precisa "pular" pra excluir. Mais agressivo, valida o sistema rapidamente. Rejeitado: trader que pular X jogo na vida real e o sistema marcar como GREEN/RED pra ele é mentira — assume entrada quando não houve. ROI vira aspiracional, não real.
+- **(C) Híbrido com timer:** Sinal pending por X minutos, depois auto-PULA. Espelha realidade do trading (timing matter). Rejeitado pra MVP: complica UX (precisa countdown visual, regras de "perdeu janela", edge cases de timezone). Pode virar feature depois.
+
+**Trade-offs:**
+- ✅ ROI real, não aspiracional. User só vê números que ele construiu.
+- ✅ Cada user tem seu próprio dashboard (multi-tenant real).
+- ✅ Schema simples: `user_signal_decisions(user_id, signal_id, decision, odd_entrada, valor_apostado_cents, resultado, payout_cents)`. UNIQUE(user_id, signal_id).
+- ✅ Default pending preserva possibilidade futura de retroatividade ("marcar histórico").
+- ❌ Friction UX: 2 cliques por signal (modal pra odd+valor). Mitigação: modal pré-preenche odd do signal e valor=banca×unit_pct.
+- ❌ Stats demoram a "aparecer" para user novo. Mitigação: banner sugerindo configurar banca + entrar nos primeiros sinais.
+
+**Implementação:** Migration `0012_user_signal_decisions.sql`, `UserSignalDecisionsRepo`, endpoints `POST /api/signals/{id}/decision` + `GET /api/users/me/{stats,signals}`, refactor `/dashboard` page. Commit `feat(decisions): migration 0012 + UserSignalDecisionsRepo` + correlatos.
+
+## 2026-05-17 — Banca per-user (1:1) com movements imutáveis e movement-stake otimista
+
+**Contexto:** Cada user precisa de bankroll isolado (não global) com histórico auditável. Necessidade óbvia de multi-tenancy + reconstrução histórica do saldo pra séries temporais e drawdown.
+
+**Decisão:** Schema 2-tabelas:
+- `banca` (user_id PK FK 1:1): `banca_inicial_cents`, `banca_atual_cents` (denormalizado pra evitar SUM em cada read), `currency`, `unit_pct`, limits.
+- `banca_movements` (id, user_id FK 1:N): tipo `deposit|withdraw|correction|bet_win|bet_loss|bet_void|reset`, `valor_cents` (signed), `bet_id` (FK opcional pra `user_signal_decisions.id`), `saldo_apos_cents` (snapshot p/ reconstruir sem re-SUM).
+
+**Decisão correlata — movement-stake otimista:** Quando user decide `entered`, geramos imediatamente um movement `bet_loss` negativo do valor stake (debita saldo otimisticamente). Quando o signal resolve GREEN, geramos `bet_win` positivo com `stake * (odd - 1) + stake` (devolve stake + lucro). Em RED, o `bet_loss` original já refletiu a perda — nada mais a fazer.
+
+**Alternativas consideradas:**
+- **Schema agregado único** (banca com `pnl_running`, sem movements): rejeitado — perde audit trail.
+- **Bet pendente sem afetar saldo** (só debita quando settle): rejeitado — saldo "fictício" durante apostas em curso engana decisão do user sobre próximas entradas (ele acha que tem mais dinheiro que tem).
+- **`stake_pendente` field separado** (não-debita banca_atual): bom mas complica leitura/escrita. Difere YAGNI até reclamarem.
+
+**Trade-offs:**
+- ✅ Audit trail completo via movements.
+- ✅ `banca_atual_cents` denormalizado = O(1) read.
+- ✅ Stake otimista = saldo reflete realidade (incluindo apostas em curso).
+- ✅ Schema preparado pra `bet_void` (anula sem afetar PnL) e `correction` (ajuste manual c/ motivo).
+- ❌ Re-trigger settle precisa cuidar pra não duplicar `bet_win`. Mitigação: `WHERE resultado IS NULL` no UPDATE.
+- ❌ Se `settle` falhar entre o `bet_loss` otimista e o `bet_win` real, banca fica errada. Mitigação futura: job de reconciliação batch.
+
+**Implementação:** Migration `0011_banca.sql`, `BancaRepo`, 6 endpoints `/api/banca/*`. Commit `feat(banca): migration 0011 + BancaRepo` + correlatos.

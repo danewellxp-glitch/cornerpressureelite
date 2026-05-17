@@ -17,6 +17,44 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-17 — Sprint M (Multi-tenant): Banca + Decisões por sinal + Dashboard limpo per-user + Fix upcoming/SSE
+
+**Contexto:** Usuário reportou que `/dashboard` e `/jogos-ao-vivo` não mostravam dados, `/banca` retornava 404 no setup, "próximos jogos" mostrava partidas que já tinham começado, e novos cadastros viam stats globais (76.9% winrate de OUTRAS pessoas) em vez de receber dashboard limpo. Permissão dada pra mexer no backend e refazer o sistema pra multi-tenant real.
+
+**O que foi feito:**
+
+1. **Recovery do dashboard v2** (sessão anterior continuada): 55 arquivos restaurados de imagem Docker dangling `ac5d12b91d1a` (sessão anterior havia perdido o source). Commits `0487d39` (recover), `5774e34` (fix gitignore `logs/` global comendo rota Next.js), `bb750ea` (CSS tokens completos), `6e787ff` (SSE auth sync cookie→localStorage), `4e7c55a` (5 fixes do code review), `a9b19a7` (redesign `/jogos-ao-vivo` via frontend-design skill — terminal aesthetic).
+
+2. **Bugs de dados:**
+   - `8cfa970` — `fetchSignalsList(2000)` rejeitado pelo backend (cap=500). Trocado nos 3 callers (`/dashboard`, `/performance`, `/aprenda`).
+   - `c0f4abb` + `22f9a70` — Cloudflare gzip quebrava SSE. Route proxy local `/api/sse/dashboard` server-side com `Cache-Control: no-transform`.
+   - `d52de32` — upcoming games mostrando IDs já em live. `data_reader.get_upcoming_games()` exclui IDs em `live_state.{na,pre,pos}_janela`.
+
+3. **Sprint M (multi-tenant per-user):**
+   - **Banca** (5 commits): migration `0011_banca` (tabelas `banca` 1:1 + `banca_movements` 1:N com snapshot `saldo_apos_cents`), `BancaRepo`, 6 endpoints `/api/banca/*` (eram 404 antes), validação atomica via SELECT FOR UPDATE + transação.
+   - **Decisões por sinal**: migration `0012_user_signal_decisions` (UNIQUE user+signal, default pending), `UserSignalDecisionsRepo`, endpoints `POST /api/signals/{id}/decision`, `GET /api/users/me/{stats,signals}`. Default opt-in (signal nasce pending — só conta se user clicar [✓ ENTREI] com odd+valor).
+   - **Frontend `/dashboard`** refatorado: `fetchUserSignals` substitui `fetchSignalsList`; KPIs vêm de decisions entered + resultado resolvido (não mais stats globais); coluna "Decisão" interativa em cada linha (botões pending → modal com pré-preenchimento de odd e valor=banca×unit_pct); banner amarelo "Configure sua banca" se !configured.
+   - **Movement-stake otimista**: quando user marca `entered`, gera movement `bet_loss` negativo na banca imediatamente. Quando signal resolve GREEN, settle gera `bet_win` positivo. Banca reflete realidade em curso.
+
+**Bugs encontrados:** [fetchSignalsList limit 2000](BUGS.md#2026-05-17--fetchsignalslistlimit2000--backend-rejeita-400), [Cloudflare gzip quebra SSE](BUGS.md#2026-05-17--cloudflare-gzip-quebra-sse-eventsource), [Banca endpoints inexistentes](BUGS.md#2026-05-17--banca-backend-endpoints-inexistentes).
+
+**Decisões:** [Decisão por sinal opt-in](DECISIONS.md#2026-05-17--sistema-de-decisão-por-sinal-opt-in-default--não-entrou), [Banca per-user schema](DECISIONS.md#2026-05-17--banca-per-user-11-com-movements-imutáveis-e-movement-stake-otimista).
+
+**Estado final:**
+- ✅ `/dashboard` user-scoped (KPIs/ROI/chart vêm das decisões do user)
+- ✅ `/banca` funcional end-to-end (smoke: setup R$1000 → deposit R$100 → saldo R$1100 ✓)
+- ✅ `/jogos-ao-vivo` recebendo SSE descomprimido
+- ✅ Próximos jogos filtra IDs já em live
+- ✅ 7 commits no `feat/sofascore-integration`
+
+**Próximos passos:**
+- Wire o `settle` automático no signal-result-checker (quando jogo fecha GREEN/RED, chamar `UserSignalDecisionsRepo.settle` em cascata).
+- Limpar 17 componentes MUI órfãos (mapeados em audit anterior).
+- Implementar 3 quick wins UX/a11y (focus-visible global, escape/click-outside em modais, contraste fixes).
+- T2 (delay 2min jogos ao vivo): investigar se `POLLING_INTERVAL=60s` vale baixar pra 30s agora que SofaScore é primary (10 req/s, AF removido do runtime).
+
+---
+
 ## 2026-05-17 — P4 monitoring 36h (decisão informada P4 PARTE 1)
 
 **Contexto:** P4 quick-win (cron preventivo Brave 12h) implementado, mas P4 PARTE 1 (supervisor reativo) ainda discutível. Em vez de implementar supervisor "no escuro", aprovamos plano de **coletar 36h de telemetria** (dom + seg, alto volume jogos) e decidir baseado em dado real.

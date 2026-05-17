@@ -14,6 +14,18 @@ Commit: hash (se aplicável)
 
 ---
 
+## 2026-05-17 — Login não entra no dashboard (redirect loop)
+
+**Sintoma:** Usuário logava em `iqpressure.online/login` com sucesso (API retornava 200 + token), cookie `cpes-auth` era setado, mas qualquer navegação pra `/dashboard` redirecionava de volta pro `/login` infinitamente.
+
+**Causa raiz:** O middleware do Next.js (`dashboard/src/middleware.ts`) verifica o JWT com `process.env.JWT_SECRET || "cpes-jwt-secret-key-2026-super-secure"`. O serviço `dashboard` em `docker-compose.yml` não passava `JWT_SECRET` no environment, e `dashboard/.env.production` (que tem o valor correto) está bloqueado pelo `.dockerignore` (`.env*`). Resultado: middleware caía no fallback `"cpes-jwt-secret-key-2026-super-secure"` enquanto API assinava com `changeme_please_generate_a_secure_random_string_12345` → `jwtVerify` lançava → redirect pra `/login`.
+
+**Fix:** Adicionar `env_file: ./corner-pressure-elite/.env` ao serviço `dashboard` no `docker-compose.yml`. Mesma fonte da API, garante simetria do segredo.
+
+**Lição:** `.env*` no `.dockerignore` é boa prática, mas exige que segredos cheguem ao container por outro caminho (env_file no compose ou Docker secrets). Se middleware tem fallback embutido pra segredo, ele esconde silenciosamente esse tipo de erro — preferir `throw` quando env crítica está ausente.
+
+---
+
 ## 2026-05-14 — Deadlock circular gate de cartões
 
 **Sintoma:** Bridge nunca era chamado pra cartões. Nenhum sinal de cartões emitido em ~3 semanas.
@@ -147,3 +159,45 @@ Checklist defensivo consolidado em [`docs/architecture/playwright-anti-bot-check
 3. Quando fixture cruzar pra `na_janela`, capturas escalam pra 50+ automaticamente
 
 **Lição:** Comparar "fixture novo (min 26)" com "fixture antigo (min 75)" no mesmo snapshot de `odds_history` é falsa equivalência — cada fixture passa por `pre → na → pos` sequencialmente. Antes de declarar bug em pipeline com polling adaptativo, sempre **checar a fase atual** do fixture, não só contar linhas no DB.
+
+
+## 2026-05-17 — fetchSignalsList(limit=2000) → backend rejeita 400
+
+**Sintoma:** `/dashboard`, `/performance`, `/aprenda` aparecem **sem dados nenhum** (loading state + error banner). `/escanteios` e `/cartoes-amarelos` na mesma sessão funcionam normais.
+
+**Causa raiz:** Backend `/api/signals/list` valida `limit 1..500` (`api_server.py`). Três páginas frontend chamavam `fetchSignalsList("all", 2000)`. Resposta 400 com `{"detail":"limit 1..500"}`. Catch silencioso (`.catch(() => {})` em aprenda/performance, `console.error` em dashboard), `allSignals=[]`, render normal mas vazio. As outras páginas (MarketPage, sinais-historico) pediam 500 — passavam.
+
+**Fix:** `2000 → 500` nos 3 callers (`dashboard/page.tsx:97`, `performance/page.tsx:57`, `aprenda/page.tsx:24`). Commit `8cfa970`.
+
+**Lição:** Backend caps silenciosos viram bug de UX invisível quando frontend tem error handling fraco. Validações de range devem aparecer em swagger/types, e catches devem mostrar erro visível em DEV mode pelo menos.
+
+## 2026-05-17 — Cloudflare gzip quebra SSE EventSource
+
+**Sintoma:** `/jogos-ao-vivo` (e qualquer página com `useDashboard()` hook) ficava com status `connected` mas `data === null` eternamente. Backend retornava 200 OK no `/api/stream/dashboard` (logs confirmavam), mas `onmessage` no client nunca disparava.
+
+**Causa raiz:** Cloudflare adicionava `Content-Encoding: gzip` em respostas `text/event-stream` no edge. Backend direto NÃO comprimia (verificado via curl interno), mas via CF o header `content-encoding: gzip` aparecia. gzip bufferiza dados antes de emitir o primeiro chunk — SSE manda eventos pequenos (~1KB) a cada 2s, então o primeiro byte gzipped nunca chegava ao cliente.
+
+Tentativa 1 (falhou): `fetch` com `Accept-Encoding: identity` header. Chrome **ignora** silenciosamente — é "forbidden header name" no spec WHATWG. Request continuou indo com `accept-encoding: gzip, deflate, br, zstd` mesmo após meu override.
+
+**Fix correto:** Route handler local `dashboard/src/app/api/sse/dashboard/route.ts` que server-side faz fetch ao backend com `Accept-Encoding: identity` (server-side fetch NÃO tem essa restrição) e devolve a resposta com:
+- `Cache-Control: no-cache, no-store, no-transform` (no-transform = CDN não comprime)
+- `Content-Encoding: identity` (declara explicitamente uncompressed)
+- `X-Accel-Buffering: no` (anti-buffer em proxies)
+
+CF respeita `no-transform` e não re-comprime no edge. Cliente conecta na rota local com `EventSource` normal. Commits `c0f4abb` (errado, fetch client-side), `22f9a70` (correto, route proxy).
+
+**Lição:**
+- `Accept-Encoding`, `Content-Length`, etc. são forbidden header names — fetch client-side não pode setar.
+- CF Auto-compress trata `text/event-stream` como qualquer text e quebra streaming.
+- `Cache-Control: no-transform` é a forma canônica de dizer "nenhum proxy modifica isso".
+- Sempre testar SSE via curl externo (passa por CDN) e não só localhost.
+
+## 2026-05-17 — Banca: backend endpoints inexistentes
+
+**Sintoma:** Click em "Iniciar Banca" em `/banca` retornava `{"detail":"Not Found"}` (HTTP 404). Frontend chamava 5 endpoints (`/api/banca`, `/api/banca/setup`, `/api/banca/movements`, `/api/banca/series`, `/api/banca/reset`).
+
+**Causa raiz:** Backend nunca implementou nenhum endpoint `/banca/*`. Frontend `dashboard/src/lib/api.ts` foi escrito antecipando o contrato.
+
+**Fix:** Migration `0011_banca.sql` (tabelas `banca` 1:1 user + `banca_movements` 1:N), `data/repositories/banca.py` (BancaRepo), 6 endpoints no `api_server.py`. Commits `feat(banca): migration 0011 + BancaRepo` + `feat(api): endpoints /api/banca/*`.
+
+**Lição:** Frontend e backend evoluíram desincronizados. Próxima vez: contrato via OpenAPI gerado, ou pelo menos um issue com checklist amarrando os 2 lados antes de mergear lib/api.ts.
