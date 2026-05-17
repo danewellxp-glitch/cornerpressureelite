@@ -30,8 +30,14 @@ async def refetch_validate_corners(
     current_score: int,
     jogo,
     max_drift_pct: float = 0.15,
+    *,
+    blocked_repo=None,
 ) -> bool:
-    """Retorna True se ok pra emitir, False se abort."""
+    """Retorna True se ok pra emitir, False se abort.
+
+    Quando abort + `blocked_repo` informado, persiste em blocked_signals
+    pra análise de qualidade do filtro.
+    """
     return await _refetch_validate(
         composite_odds,
         method="get_corners",
@@ -43,6 +49,7 @@ async def refetch_validate_corners(
         update_jogo_field="odd_atual",
         market_kind="corners",
         max_drift_pct=max_drift_pct,
+        blocked_repo=blocked_repo,
     )
 
 
@@ -52,6 +59,8 @@ async def refetch_validate_cards(
     current_score: int,
     jogo,
     max_drift_pct: float = 0.15,
+    *,
+    blocked_repo=None,
 ) -> bool:
     return await _refetch_validate(
         composite_odds,
@@ -64,6 +73,7 @@ async def refetch_validate_cards(
         update_jogo_field="odd_cartoes",
         market_kind="cards",
         max_drift_pct=max_drift_pct,
+        blocked_repo=blocked_repo,
     )
 
 
@@ -79,6 +89,7 @@ async def _refetch_validate(
     update_jogo_field: str,
     market_kind: str,
     max_drift_pct: float,
+    blocked_repo=None,
 ) -> bool:
     fid = canonical_fixture.fixture_id
     try:
@@ -90,6 +101,9 @@ async def _refetch_validate(
             "refetch.exception fixture=%d market=%s err=%s",
             fid, market_kind, e,
         )
+        await _record_block(blocked_repo, fid, market_kind, orig_linha,
+                            "refetch_exception", orig_odd, None, None,
+                            metadata={"err": str(e)[:200]})
         return False
 
     if fresh is None:
@@ -97,6 +111,8 @@ async def _refetch_validate(
             "refetch.none fixture=%d market=%s — bridge falhou + cache expirado, sinal bloqueado",
             fid, market_kind,
         )
+        await _record_block(blocked_repo, fid, market_kind, orig_linha,
+                            "refetch_none", orig_odd, None, None)
         return False
 
     if getattr(fresh, "is_stale", False):
@@ -104,6 +120,9 @@ async def _refetch_validate(
             "refetch.stale fixture=%d market=%s age=%ds — sinal bloqueado",
             fid, market_kind, getattr(fresh, "age_seconds", 0),
         )
+        await _record_block(blocked_repo, fid, market_kind, orig_linha,
+                            "refetch_stale", orig_odd, fresh.odd_over, None,
+                            metadata={"age_seconds": getattr(fresh, "age_seconds", 0)})
         return False
 
     if abs(fresh.linha - orig_linha) > 0.01:
@@ -111,6 +130,9 @@ async def _refetch_validate(
             "refetch.line_changed fixture=%d market=%s orig=%.1f fresh=%.1f — sinal bloqueado",
             fid, market_kind, orig_linha, fresh.linha,
         )
+        await _record_block(blocked_repo, fid, market_kind, orig_linha,
+                            "line_changed", orig_odd, fresh.odd_over, None,
+                            metadata={"fresh_linha": fresh.linha})
         return False
 
     if orig_odd <= 0:
@@ -124,6 +146,8 @@ async def _refetch_validate(
             "refetch.odd_drift fixture=%d market=%s orig=%.2f fresh=%.2f drift=%.1f%% > %.1f%% — sinal bloqueado",
             fid, market_kind, orig_odd, fresh.odd_over, drift * 100, max_drift_pct * 100,
         )
+        await _record_block(blocked_repo, fid, market_kind, orig_linha,
+                            "odd_drift", orig_odd, fresh.odd_over, drift * 100)
         return False
 
     if drift > 0.0:
@@ -134,3 +158,26 @@ async def _refetch_validate(
         )
         setattr(jogo, update_jogo_field, fresh.odd_over)
     return True
+
+
+async def _record_block(
+    blocked_repo,
+    fixture_id: int,
+    market_kind: str,
+    linha: float,
+    reason: str,
+    orig_odd: Optional[float],
+    fresh_odd: Optional[float],
+    drift_pct: Optional[float],
+    metadata: Optional[dict] = None,
+) -> None:
+    if blocked_repo is None:
+        return
+    try:
+        await blocked_repo.insert(
+            fixture_id=fixture_id, market_kind=market_kind, linha=linha,
+            reason=reason, orig_odd=orig_odd, fresh_odd=fresh_odd,
+            drift_pct=drift_pct, metadata=metadata,
+        )
+    except Exception as e:
+        log.warning("refetch.record_block_failed fixture=%d err=%s", fixture_id, e)

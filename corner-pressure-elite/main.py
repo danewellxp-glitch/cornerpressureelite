@@ -69,6 +69,7 @@ from data.odds_provider import CanonicalFixture
 from data.providers.factory import build_providers
 from data.repositories.fixture_map import FixtureMapRepo
 from data.repositories.betano_team_map import BetanoTeamMapRepo
+from data.repositories.blocked_signals import BlockedSignalsRepo
 from data.repositories.odds_history import OddsHistoryRepo
 from data.persistence.odds_worker import OddsPersistenceWorker
 from data.discovery.fixture_matcher import FixtureMatcher
@@ -237,6 +238,9 @@ class CornerPressureElite:
             )
             await self.odds_persistence_worker.start()
             logger.info("OddsPersistenceWorker iniciado — telemetria de odds ATIVA")
+
+            # P5 (2026-05-17): repo pra registrar sinais bloqueados pelo refetch
+            self.blocked_signals_repo = BlockedSignalsRepo(self.database.pool)
 
             fixture_repo = FixtureMapRepo(self.database.pool)
             self.composite_odds, composite_stats, self._providers_shutdown = (
@@ -1390,6 +1394,7 @@ class CornerPressureElite:
                     refetch_ok = await refetch_validate_corners(
                         self.composite_odds, canonical_fixture, score, jogo,
                         max_drift_pct=config.ODDS_REFETCH_MAX_DRIFT_PCT,
+                        blocked_repo=getattr(self, "blocked_signals_repo", None),
                     )
                     if not refetch_ok:
                         logger.warning(
@@ -1491,6 +1496,7 @@ class CornerPressureElite:
                                 refetch_ok_cards = await refetch_validate_cards(
                                     self.composite_odds, canonical_fixture, score, jogo,
                                     max_drift_pct=config.ODDS_REFETCH_MAX_DRIFT_PCT,
+                                    blocked_repo=getattr(self, "blocked_signals_repo", None),
                                 )
                                 if not refetch_ok_cards:
                                     logger.warning(

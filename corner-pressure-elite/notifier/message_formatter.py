@@ -85,6 +85,8 @@ class MessageFormatter:
             f"{odds_block}"
             f"Linha de refer\u00eancia: {jogo.linha_atual} ({fonte_linha})\n"
             f"Stake sugerida: 1u\n"
+            f"\u23f1\ufe0f *Odd capturada:* {sinal.timestamp.strftime('%H:%M:%S')} "
+            f"(snapshot \u2014 odd pode variar segundo-a-segundo)\n"
             f"\n"
             f"{alt_block}"
             f"\u26a0\ufe0f *Confira a linha na sua casa antes de apostar* \u2014 "
