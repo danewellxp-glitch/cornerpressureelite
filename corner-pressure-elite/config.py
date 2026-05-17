@@ -313,3 +313,18 @@ STATS_WINDOW_HISTORY_SIZE = int(os.getenv("STATS_WINDOW_HISTORY_SIZE", "120"))
 # Quanto buscar do stats_history no bootstrap do worker (restart). Default
 # 20 min cobre comfortably as janelas de 10min.
 STATS_BOOTSTRAP_LOOKBACK_MIN = int(os.getenv("STATS_BOOTSTRAP_LOOKBACK_MIN", "20"))
+
+
+# ============================================================
+# Events Betano via bridge (Fase F — dataset puro)
+# ============================================================
+# BetanoEventsWorker captura event.incidents[] do mesmo endpoint
+# /event/<id>/state já usado pelo BridgeStatsAdapter (Fase E.1).
+# Escopo "dataset puro": persiste em events_history, decision_engine NÃO
+# consome (PASSO 0 confirmou zero consumidores externos). Alimenta
+# Quant H1-H4 (timeline real de eventos).
+USE_BETANO_EVENTS = os.getenv("USE_BETANO_EVENTS", "false").lower() == "true"
+# Intervalo entre capturas. 30s default — eventos são pontuais (gol, cartão
+# etc), polling acima de stats (15s) é desnecessário; dedup do schema absorve
+# excesso de qualquer modo.
+EVENTS_POLL_INTERVAL_SEC = int(os.getenv("EVENTS_POLL_INTERVAL_SEC", "30"))

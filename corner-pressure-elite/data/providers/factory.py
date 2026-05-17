@@ -207,3 +207,46 @@ async def build_providers(
             shutdown()  # type: ignore[func-returns-value]
         return composite_odds, composite_stats, _wrap
     return composite_odds, composite_stats, shutdown
+
+
+# ---------------------------------------------------------------------------
+# Events provider factory (Fase F — dataset puro)
+# ---------------------------------------------------------------------------
+
+async def build_events_provider(
+    settings: Any,
+    api_client: Any,
+    *,
+    fixture_repo: Any = None,
+) -> Tuple["CompositeEventsProvider", ShutdownFn]:
+    """Constrói `CompositeEventsProvider` (Betano bridge primary + AF fallback).
+
+    Pré-condição: caller já checou `USE_BETANO_BRIDGE and USE_BETANO_STATS`
+    (ou política equivalente) — esta função NÃO valida flags, só monta.
+
+    Retorna `(provider, shutdown_async)`. Shutdown fecha sessions HTTP do
+    bridge adapter.
+    """
+    from data.events_provider import CompositeEventsProvider
+    from data.providers.betano.bridge_events_adapter import BridgeEventsAdapter
+    from data.providers.apifootball.events_adapter import APIFootballEventsAdapter
+
+    bridge_url = getattr(settings, "BETANO_BRIDGE_URL", "http://localhost:8080")
+    timeout = float(getattr(settings, "BETANO_BRIDGE_TIMEOUT_SEC", 25.0))
+
+    bridge_events = BridgeEventsAdapter(
+        bridge_url=bridge_url,
+        fixture_repo=fixture_repo,
+        timeout_seconds=timeout,
+    )
+    af_events = APIFootballEventsAdapter(api_client)
+    composite = CompositeEventsProvider([bridge_events, af_events])
+
+    async def shutdown() -> None:
+        await bridge_events.close()
+
+    log.info(
+        "providers.events_stack primary=bridge_betano fallback=apifootball bridge_url=%s",
+        bridge_url,
+    )
+    return composite, shutdown
