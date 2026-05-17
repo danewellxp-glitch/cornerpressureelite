@@ -11,3 +11,4 @@ venv/
 dist/
 build/
 .pytest_cache/
+config/betano_cookies.json

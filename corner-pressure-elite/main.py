@@ -78,35 +78,6 @@ from workers.betano_stats_worker import BetanoStatsWorker
 logger = logging.getLogger("CPES.Main")
 
 
-def _build_canonical_fixture(fixture: Dict, liga_id: int) -> CanonicalFixture:
-    """Constrói `CanonicalFixture` mínimo pra passar pro StatsProvider.
-
-    Fonte: dict do API-Football `fixtures?live=all`. Apenas dados essenciais
-    pro adapter resolver `fixture_id → betano_event_id` via `fixture_repo`.
-    """
-    fixture_info = fixture.get("fixture", {})
-    teams = fixture.get("teams", {})
-    goals = fixture.get("goals", {}) or {}
-    starts_iso = fixture_info.get("date")
-    starts_at: datetime
-    if isinstance(starts_iso, str):
-        try:
-            starts_at = datetime.fromisoformat(starts_iso.replace("Z", "+00:00"))
-        except ValueError:
-            starts_at = datetime.now(timezone.utc)
-    else:
-        starts_at = datetime.now(timezone.utc)
-    return CanonicalFixture(
-        fixture_id=fixture_info.get("id", 0),
-        home_team=teams.get("home", {}).get("name", "?"),
-        away_team=teams.get("away", {}).get("name", "?"),
-        league_id=liga_id,
-        starts_at_utc=starts_at,
-        score_home=goals.get("home", 0) or 0,
-        score_away=goals.get("away", 0) or 0,
-    )
-
-
 def _serialize_fixture(
     fixture: Dict, fase: str, escanteios: int | None = None,
     cartoes: int | None = None,
@@ -1018,7 +989,8 @@ class CornerPressureElite:
                 # injeta o snapshot do CanonicalStats por cima.
                 jogo = parse_fixture_to_jogo(fixture, [], liga_id)
                 enrich_jogo_with_cards(jogo, [], liga_id)
-                canonical_fixture_for_stats = _build_canonical_fixture(fixture, liga_id)
+                # Reusa o helper de classe (já existia pra capturar odds Betano).
+                canonical_fixture_for_stats = self._build_canonical_fixture(jogo)
                 stats_canonical = await self.stats_worker.poll(canonical_fixture_for_stats)
                 if stats_canonical is None:
                     logger.debug(

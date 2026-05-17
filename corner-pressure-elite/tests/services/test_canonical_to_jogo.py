@@ -6,7 +6,12 @@ from datetime import datetime, timezone
 import pytest
 
 from data.models import JogoAoVivo
-from data.services.canonical_to_jogo import canonical_to_jogo, recalc_minute_if_cached
+from data.services.canonical_to_jogo import (
+    BETANO_GAPS,
+    canonical_to_jogo,
+    recalc_minute_if_cached,
+    _validate_betano_gaps_against_jogo_schema,
+)
 from data.stats_provider import CanonicalStats
 
 
@@ -50,8 +55,12 @@ def _stats(**overrides) -> CanonicalStats:
     return CanonicalStats(**base)
 
 
-def test_mapper_overrides_score_minute_corners_yellow_shots():
-    """Campos que Betano sempre cobre: canonical sempre vence."""
+def test_mapper_overrides_score_minute_corners_yellow():
+    """Campos que Betano sempre cobre: canonical sempre vence.
+
+    NOTA: finalizacoes_recentes NÃO está aqui — foi pra BETANO_GAPS após
+    review (semantic mismatch Betano `shots` ≠ AF `Shots on Goal`).
+    """
     jogo = canonical_to_jogo(_jogo_base(), _stats())
     assert jogo.minuto == 67
     assert jogo.placar_casa == 1
@@ -62,7 +71,6 @@ def test_mapper_overrides_score_minute_corners_yellow_shots():
     assert jogo.cartoes_amarelos_total == 3
     assert jogo.cartoes_amarelos_casa == 1
     assert jogo.cartoes_amarelos_fora == 2
-    assert jogo.finalizacoes_recentes == 7
 
 
 def test_mapper_preserves_metadata_and_history_and_odds():
@@ -85,8 +93,8 @@ def test_mapper_preserves_metadata_and_history_and_odds():
     assert jogo.faltas_fora == 5
 
 
-def test_mapper_preserves_gap_fields_when_canonical_zero():
-    """red_cards/dangerous_attacks/possession só sobrescrevem se canonical > 0."""
+def test_mapper_preserves_betano_gaps_when_canonical_zero():
+    """Campos em BETANO_GAPS NUNCA sobrescrevem — preservam jogo_base."""
     base = _jogo_base()
     base = JogoAoVivo(
         **{
@@ -99,21 +107,102 @@ def test_mapper_preserves_gap_fields_when_canonical_zero():
             "posse_ultimos_10min": 60.0,
         }
     )
-    jogo = canonical_to_jogo(base, _stats())  # canonical zerado nesses 3
-    assert jogo.cartoes_vermelhos_total == 1   # preservado
-    assert jogo.ataques_perigosos_ultimos_10min == 42  # preservado
-    assert jogo.posse_ultimos_10min == 60.0  # preservado
-
-
-def test_mapper_overrides_gap_fields_when_canonical_has_value():
-    """red_cards/dangerous_attacks/possession sobrescrevem se canonical > 0."""
-    jogo = canonical_to_jogo(
-        _jogo_base(),
-        _stats(red_cards_home=1, dangerous_attacks_home=20, possession_home=55),
-    )
+    jogo = canonical_to_jogo(base, _stats())  # canonical zero nesses 3
     assert jogo.cartoes_vermelhos_total == 1
-    assert jogo.ataques_perigosos_ultimos_10min == 20
-    assert jogo.posse_ultimos_10min == 55.0
+    assert jogo.ataques_perigosos_ultimos_10min == 42
+    assert jogo.posse_ultimos_10min == 60.0
+
+
+def test_mapper_preserves_betano_gaps_even_when_canonical_has_value():
+    """Política nova: GAP é GAP — nunca sobrescreve, mesmo se canonical traz valor.
+
+    Cenário possível: bridge no futuro popular red_cards via incidents parser.
+    Até promover o campo PRA FORA de BETANO_GAPS, jogo_base reina.
+    """
+    base = _jogo_base()
+    base = JogoAoVivo(
+        **{
+            **{k: getattr(base, k) for k in base.__dataclass_fields__.keys()},
+            "cartoes_vermelhos_total": 1,
+            "ataques_perigosos_ultimos_10min": 42,
+            "posse_ultimos_10min": 60.0,
+        }
+    )
+    jogo = canonical_to_jogo(
+        base,
+        _stats(red_cards_home=99, dangerous_attacks_home=99, possession_home=99),
+    )
+    # Mantém jogo_base; canonical>0 NÃO sobrescreve em GAP.
+    assert jogo.cartoes_vermelhos_total == 1
+    assert jogo.ataques_perigosos_ultimos_10min == 42
+    assert jogo.posse_ultimos_10min == 60.0
+
+
+def test_mapper_preserves_posse_when_betano_zero_and_af_nonzero():
+    """Regression: AF preencheu posse=65%, Betano não cobre. jogo_base prevalece."""
+    base = _jogo_base()
+    base = JogoAoVivo(
+        **{
+            **{k: getattr(base, k) for k in base.__dataclass_fields__.keys()},
+            "posse_ultimos_10min": 65.0,
+        }
+    )
+    jogo = canonical_to_jogo(base, _stats(possession_home=0, possession_away=0))
+    assert jogo.posse_ultimos_10min == 65.0
+
+
+def test_mapper_preserves_faltas_when_betano_doesnt_cover():
+    """Regression: faltas vêm sempre do jogo_base (Betano /latest não cobre)."""
+    base = _jogo_base()  # já tem faltas_total=12, casa=7, fora=5
+    jogo = canonical_to_jogo(base, _stats())
+    assert jogo.faltas_total == 12
+    assert jogo.faltas_casa == 7
+    assert jogo.faltas_fora == 5
+
+
+def test_mapper_preserves_finalizacoes_recentes_due_to_shots_semantic_gap():
+    """finalizacoes_recentes está em BETANO_GAPS — Betano `shots` ≠ AF `Shots on Goal`.
+
+    Mesmo com canonical.shots_on_target_* > 0, mapper preserva jogo_base
+    pra não corromper semântica.
+    """
+    base = _jogo_base()
+    base = JogoAoVivo(
+        **{
+            **{k: getattr(base, k) for k in base.__dataclass_fields__.keys()},
+            "finalizacoes_recentes": 8,
+        }
+    )
+    jogo = canonical_to_jogo(
+        base,
+        _stats(shots_on_target_home=99, shots_on_target_away=99),
+    )
+    assert jogo.finalizacoes_recentes == 8  # preservado
+
+
+def test_mapper_documents_betano_gaps_explicitly():
+    """BETANO_GAPS é coerente com docs (DECISIONS §CASO α + betano-stats-api §3).
+
+    1. Todo nome em BETANO_GAPS é campo válido em JogoAoVivo.
+    2. Conjunto bate com a lista canônica documentada (regression guard).
+    """
+    _validate_betano_gaps_against_jogo_schema()
+    expected = frozenset({
+        "cartoes_vermelhos_total",
+        "cartoes_vermelhos_casa",
+        "cartoes_vermelhos_fora",
+        "posse_ultimos_10min",
+        "faltas_total",
+        "faltas_casa",
+        "faltas_fora",
+        "ataques_perigosos_ultimos_10min",
+        "finalizacoes_recentes",
+    })
+    assert BETANO_GAPS == expected, (
+        f"BETANO_GAPS mudou — atualizar docs/architecture/betano-stats-api.md §3 "
+        f"e docs/DECISIONS.md §CASO α antes de mergear. "
+        f"Diff vs esperado: {BETANO_GAPS ^ expected}"
+    )
 
 
 def test_mapper_window_fields_only_set_when_canonical_has_value():
