@@ -56,16 +56,23 @@ class EventsProvider(Protocol):
     name: str
 
     async def get_events(
-        self, fixture_id: int, *, home_team_id: Optional[int] = None
+        self,
+        fixture_id: int,
+        *,
+        betano_event_id: Optional[int] = None,
+        home_team_id: Optional[int] = None,
     ) -> Optional[list[CanonicalEvent]]:
         """Retorna lista de eventos do fixture.
 
-        `home_team_id` é hint opcional pra adapters que precisam resolver
-        team_side a partir de team_id (AF). Bridge Betano ignora — `teamSide`
-        já vem 0/1 no incident.
+        Args:
+            fixture_id: ID canônico do fixture (API-Football).
+            betano_event_id: Hint pré-resolvido pra bridge Betano evitar
+                lookup no `fixture_repo`. AF ignora.
+            home_team_id: Hint pra adapters AF resolverem `team_side` via
+                `team.id`. Bridge Betano ignora — `teamSide` já vem 0/1.
 
         Retorno:
-        - `list[CanonicalEvent]` (possivelmente vazia) quando provider OK
+        - `list[CanonicalEvent]` (possivelmente vazia) quando provider OK.
         - `None` quando provider falhou (erro de rede, sem mapping, etc) —
           caller decide se faz fallback.
         """
@@ -90,23 +97,41 @@ class CompositeEventsProvider:
         self._providers = list(providers)
 
     async def get_events(
-        self, fixture_id: int, *, home_team_id: Optional[int] = None
+        self,
+        fixture_id: int,
+        *,
+        betano_event_id: Optional[int] = None,
+        home_team_id: Optional[int] = None,
     ) -> Optional[list[CanonicalEvent]]:
         for p in self._providers:
             try:
-                events = await p.get_events(fixture_id, home_team_id=home_team_id)
+                events = await p.get_events(
+                    fixture_id,
+                    betano_event_id=betano_event_id,
+                    home_team_id=home_team_id,
+                )
             except Exception as e:
                 log.warning(
                     "composite_events.%s.error fixture=%d err=%s",
                     p.name, fixture_id, e,
                 )
                 continue
-            if events is not None:
+            if events is None:
+                continue
+            # [] = sucesso (provider respondeu, sem eventos novos). Não cai
+            # pra fallback. Log INFO ajuda analytics futuro detectar pattern
+            # (ex: Betano persistentemente vazio quando devia ter eventos).
+            if not events:
+                log.info(
+                    "composite_events.empty source=%s fixture=%d",
+                    p.name, fixture_id,
+                )
+            else:
                 log.debug(
                     "composite_events.hit provider=%s fixture=%d count=%d",
                     p.name, fixture_id, len(events),
                 )
-                return events
+            return events
         return None
 
     async def healthcheck(self) -> bool:

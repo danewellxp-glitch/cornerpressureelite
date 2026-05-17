@@ -48,6 +48,19 @@ Fases planejadas + estado atual. Atualizado quando fase fecha ou nova é planeja
 
 ### Fase I — Otimização + cache + testes integração (~8-15h)
 
+TODOs registrados durante fases anteriores (consolidar em sprint dedicado):
+
+- **Cache compartilhado `/event/<id>/state`** entre `BetanoStatsWorker`
+  (Fase E.1) e `BetanoEventsWorker` (Fase F) via store in-memory
+  (TTL ≈ 10s, key=event_id). Reduz ~50% chamadas ao renewer. Volume
+  atual sustentável (~5.4 MB/min ao danewell, infra local). Implementar
+  quando volume escalar (> 15 jogos simultâneos).
+- **Cache 304 do bridge dead-code em produção** — bridge TTL=3s <<
+  worker poll=15s. Reavaliar TTL ou frequência de poll.
+- **AF unmapped types**: review semanal dos logs `events_adapter.af.unmapped_type`
+  + `unmapped_var` pra detectar tipos novos AF não cobertos (`_AF_TYPE_MAP`
+  em `data/providers/apifootball/events_adapter.py`).
+
 **Total Caminho A soft restante:** ~30-50h em 5-8 sessões.
 
 ## Fases Caminho A hard (eliminar AF completamente)

@@ -78,10 +78,17 @@ class BridgeEventsAdapter:
             await self._owned_session.close()
 
     async def get_events(
-        self, fixture_id: int, *, home_team_id: Optional[int] = None
+        self,
+        fixture_id: int,
+        *,
+        betano_event_id: Optional[int] = None,
+        home_team_id: Optional[int] = None,
     ) -> Optional[list[CanonicalEvent]]:
-        """Retorna lista de eventos do fixture. `home_team_id` é ignorado
-        (Betano já fornece `teamSide` 0/1).
+        """Retorna lista de eventos do fixture.
+
+        `home_team_id` é ignorado (Betano fornece `teamSide` 0/1 direto no
+        incident). `betano_event_id` é hint pré-resolvido — quando passado,
+        evita lookup no `fixture_repo`.
 
         Cenários:
         - 200 com `data.event.incidents` válido → `list[CanonicalEvent]`
@@ -90,7 +97,7 @@ class BridgeEventsAdapter:
         - fixture sem mapping no fixture_repo → `None`
         - 4xx/5xx / timeout → `None`
         """
-        event_id = await self._resolve_event_id(fixture_id)
+        event_id = betano_event_id or await self._resolve_event_id(fixture_id)
         if not event_id:
             log.debug("bridge_events.no_event_id fixture=%d", fixture_id)
             return None
