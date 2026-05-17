@@ -60,9 +60,17 @@ _AF_POS_MAP: dict[str, str] = {
 
 
 def _map_position(af_pos: Optional[str]) -> Optional[str]:
+    """AF pos one-letter → canonical 2-letter. Fallback upper() com log warning."""
     if not isinstance(af_pos, str) or not af_pos:
         return None
-    return _AF_POS_MAP.get(af_pos.upper(), af_pos.upper())
+    mapped = _AF_POS_MAP.get(af_pos.upper())
+    if mapped:
+        return mapped
+    log.warning(
+        "lineups_af.unmapped_position pos=%r — using upper() fallback",
+        af_pos,
+    )
+    return af_pos.upper()
 
 
 class APIFootballLineupsAdapter:
@@ -78,12 +86,15 @@ class APIFootballLineupsAdapter:
         fixture_id: int,
         *,
         betano_event_id: Optional[int] = None,
+        home_team_id: Optional[int] = None,
     ) -> Optional[list[CanonicalLineup]]:
-        """Busca lineups via AF. `betano_event_id` ignorado (compat Protocol).
+        """Busca lineups via AF.
 
-        Convenção pra team_side: AF response tem 2 entries; primeira = home,
-        segunda = away (validado empiricamente). Se ordem incerta, hint
-        externo via wiring pode ajustar — mas pra MVP esse default basta.
+        - `betano_event_id`: ignorado (compat Protocol).
+        - `home_team_id`: hint pra resolver `team_side`. AF response tem 2
+          entries com `team.id` — quando hint passado, casa por id; quando
+          ausente, cai na convenção `response[0]=home, [1]=away` (bug
+          latente, log debug).
         """
         try:
             raw = await self._client.get_lineups(fixture_id)
@@ -103,13 +114,34 @@ class APIFootballLineupsAdapter:
         if not isinstance(raw, list) or len(raw) == 0:
             return []
 
-        sides = ["home", "away"]
+        home_block: Optional[dict] = None
+        away_block: Optional[dict] = None
+
+        if home_team_id is not None:
+            # Resolução defensiva via team.id (correto).
+            for block in raw:
+                if not isinstance(block, dict):
+                    continue
+                team = block.get("team") or {}
+                tid = team.get("id") if isinstance(team, dict) else None
+                if tid == home_team_id and home_block is None:
+                    home_block = block
+                elif tid != home_team_id and away_block is None:
+                    away_block = block
+        else:
+            # Fallback: convenção response[0]=home, [1]=away (frágil).
+            log.debug(
+                "lineups_af.using_order_convention fixture=%d home_team_id missing",
+                fixture_id,
+            )
+            home_block = raw[0] if isinstance(raw[0], dict) else None
+            away_block = raw[1] if len(raw) > 1 and isinstance(raw[1], dict) else None
+
         out: list[CanonicalLineup] = []
-        for i, team_block in enumerate(raw[:2]):  # max 2 (home, away)
-            if not isinstance(team_block, dict):
-                continue
-            side = sides[i] if i < len(sides) else "home"
-            out.append(self._normalize_team(fixture_id, side, team_block))
+        if home_block is not None:
+            out.append(self._normalize_team(fixture_id, "home", home_block))
+        if away_block is not None:
+            out.append(self._normalize_team(fixture_id, "away", away_block))
         return out
 
     async def healthcheck(self) -> bool:

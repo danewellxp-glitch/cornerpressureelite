@@ -78,12 +78,16 @@ class LineupsProvider(Protocol):
         fixture_id: int,
         *,
         betano_event_id: Optional[int] = None,
+        home_team_id: Optional[int] = None,
     ) -> Optional[list[CanonicalLineup]]:
         """Retorna lineups do fixture.
 
         Args:
             fixture_id: ID canônico (API-Football).
             betano_event_id: Hint pra bridge — evita lookup no `fixture_repo`.
+            home_team_id: Hint pra AF resolver `team_side` via `team.id`
+                (AF response não vem ordenado de forma confiável). Bridge
+                Betano ignora — `teamSide` já vem do payload.
 
         Retorno:
         - `list[CanonicalLineup]` com 2 itens (home + away) quando provider OK.
@@ -118,11 +122,14 @@ class CompositeLineupsProvider:
         fixture_id: int,
         *,
         betano_event_id: Optional[int] = None,
+        home_team_id: Optional[int] = None,
     ) -> Optional[list[CanonicalLineup]]:
         for p in self._providers:
             try:
                 lineups = await p.get_lineups(
-                    fixture_id, betano_event_id=betano_event_id,
+                    fixture_id,
+                    betano_event_id=betano_event_id,
+                    home_team_id=home_team_id,
                 )
             except Exception as e:
                 log.warning(
@@ -140,6 +147,22 @@ class CompositeLineupsProvider:
                     p.name, fixture_id,
                 )
                 continue
+            # AJUSTE 4b — log WARNING quando cobertura PARCIAL (1 lado OK, outro vazio).
+            has_home = (
+                len(lineups) > 0
+                and lineups[0].team_side == "home"
+                and lineups[0].has_starting_eleven
+            )
+            has_away = (
+                len(lineups) > 1
+                and lineups[1].team_side == "away"
+                and lineups[1].has_starting_eleven
+            )
+            if has_home != has_away:
+                log.warning(
+                    "lineups.partial_coverage source=%s fixture=%d home_ok=%s away_ok=%s",
+                    p.name, fixture_id, has_home, has_away,
+                )
             log.debug(
                 "composite_lineups.hit provider=%s fixture=%d sides=%d",
                 p.name, fixture_id, len(lineups),

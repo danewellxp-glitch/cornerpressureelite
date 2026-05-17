@@ -76,7 +76,11 @@ class BridgeLineupsAdapter:
         fixture_id: int,
         *,
         betano_event_id: Optional[int] = None,
+        home_team_id: Optional[int] = None,
     ) -> Optional[list[CanonicalLineup]]:
+        # home_team_id ignorado — Betano `roster.homeRoster`/`awayRoster` já vem
+        # rotulado. Aceita kwarg pra compat com `LineupsProvider` Protocol.
+        del home_team_id
         event_id = betano_event_id or await self._resolve_event_id(fixture_id)
         if not event_id:
             log.debug("bridge_lineups.no_event_id fixture=%d", fixture_id)
@@ -147,7 +151,7 @@ class BridgeLineupsAdapter:
         roster = event.get("roster") or {}
         version = data.get("version") if isinstance(data.get("version"), int) else None
 
-        return [
+        sides = [
             self._build_side(
                 fixture_id=fixture_id,
                 team_side="home",
@@ -165,6 +169,15 @@ class BridgeLineupsAdapter:
                 raw=roster,
             ),
         ]
+        # AJUSTE 4c — coach gap log DEBUG (não polui INFO).
+        for ln in sides:
+            if ln.coach_name is None:
+                log.debug(
+                    "lineups_betano.coach_missing fixture=%d team_side=%s "
+                    "(gap conhecido — BETANO_GAPS_LINEUPS)",
+                    fixture_id, ln.team_side,
+                )
+        return sides
 
     def _build_side(
         self,
@@ -193,7 +206,7 @@ class BridgeLineupsAdapter:
                 if not isinstance(entry, dict):
                     continue
                 player = self._resolve_player(
-                    entry, players_map, is_substitute=False
+                    entry, players_map, is_substitute=False, fixture_id=fixture_id,
                 )
                 if player is None:
                     continue
@@ -208,7 +221,9 @@ class BridgeLineupsAdapter:
         for entry in bench_raw:
             if not isinstance(entry, dict):
                 continue
-            player = self._resolve_player(entry, players_map, is_substitute=True)
+            player = self._resolve_player(
+                entry, players_map, is_substitute=True, fixture_id=fixture_id,
+            )
             if player is not None:
                 substitutes.append(player)
 
@@ -227,39 +242,63 @@ class BridgeLineupsAdapter:
 
     @staticmethod
     def _resolve_player(
-        entry: dict, players_map: dict, *, is_substitute: bool
+        entry: dict,
+        players_map: dict,
+        *,
+        is_substitute: bool,
+        fixture_id: Optional[int] = None,
     ) -> Optional[PlayerEntry]:
         """entry vem do lineup[][] OR benchPlayers[].
         Cross-ref com players_map pra detalhes ricos.
-        """
-        # Tem playerId (int) OR unknownPlayerId (UUID string).
-        player_id = entry.get("playerId")
-        unknown_id = entry.get("unknownPlayerId")
-        name = entry.get("name")
-        if not isinstance(name, str) or not name:
-            return None
 
-        if isinstance(player_id, int):
-            # Cross-ref no roster pra detalhes.
-            details = players_map.get(str(player_id)) or players_map.get(player_id) or {}
-            return PlayerEntry(
-                name=name,
-                player_id=player_id,
-                position=details.get("position") if isinstance(details.get("position"), str) else None,
-                position_display=details.get("positionDisplayName")
-                if isinstance(details.get("positionDisplayName"), str)
-                else None,
-                shirt_number=details.get("shirtNumber")
-                if isinstance(details.get("shirtNumber"), int)
-                else None,
-                is_substitute=is_substitute,
+        AJUSTE 1 pós-review: NUNCA descartar entry — preserva lineup com 11
+        entries mesmo quando ID falta (descartar mascarava cobertura). Sem
+        nome E sem ID retorna `PlayerEntry(name='<unknown>', player_id=None)`.
+        """
+        player_id_raw = entry.get("playerId")
+        unknown_id = entry.get("unknownPlayerId")
+        raw_name = entry.get("name")
+        name = raw_name if isinstance(raw_name, str) and raw_name else None
+
+        player_id: Optional[int] = None
+        details: dict = {}
+
+        if isinstance(player_id_raw, int):
+            player_id = player_id_raw
+            # Cross-ref no roster pra detalhes ricos.
+            details = (
+                players_map.get(str(player_id))
+                or players_map.get(player_id)
+                or {}
             )
-        if isinstance(unknown_id, str):
+            # Se entry sem nome, tenta do roster.players[id].
+            if name is None:
+                roster_name = details.get("name")
+                if isinstance(roster_name, str) and roster_name:
+                    name = roster_name
+        elif isinstance(unknown_id, str):
             # Unknown — sem detalhes ricos. Persiste só nome.
-            return PlayerEntry(
-                name=name,
-                player_id=None,
-                is_substitute=is_substitute,
+            player_id = None
+        else:
+            # Nem playerId nem unknownPlayerId — anômalo mas não descarta.
+            # Log WARNING pra investigação futura (schema Betano mudou?).
+            log.warning(
+                "lineups.player_no_id fixture=%s entry_keys=%s",
+                fixture_id, list(entry.keys()),
             )
-        # Sem ID identificável — descarta defensivamente.
-        return None
+            player_id = None
+
+        return PlayerEntry(
+            name=name or "<unknown>",
+            player_id=player_id,
+            position=details.get("position")
+            if isinstance(details.get("position"), str)
+            else None,
+            position_display=details.get("positionDisplayName")
+            if isinstance(details.get("positionDisplayName"), str)
+            else None,
+            shirt_number=details.get("shirtNumber")
+            if isinstance(details.get("shirtNumber"), int)
+            else None,
+            is_substitute=is_substitute,
+        )
