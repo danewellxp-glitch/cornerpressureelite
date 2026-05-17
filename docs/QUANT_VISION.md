@@ -3,7 +3,7 @@
 Visão técnica/quant complementar ao [`CLIENT_VISION.md`](CLIENT_VISION.md).
 Foco: independência operacional + dataset auditável proprietário.
 
-**Última atualização:** 2026-05-17 (pós Fase F entregue)
+**Última atualização:** 2026-05-17 (pós Fase G.1 entregue)
 **Owner:** Daniel
 
 ---
@@ -54,8 +54,10 @@ Não-objetivo agora — Caminho A soft é prioridade.
 | **E.0** | **Investigação técnica stats Betano** | **`5553934`** |
 | **E.1** | **Stats Betano via bridge + Composite cascade Betano→AF** | **`1e3efca`** |
 | **F** | **Events Betano via `event.incidents[]` (dataset puro)** | **`a65bfe6`** |
+| **G.0** | **Investigação técnica lineups Betano + saúde renewer** | **`508147b`** |
+| **G.1** | **Lineups Betano via `event.roster` (CASO α puro)** | **`63cfd3a`** |
 
-**Caminho A soft: ~65% completo** (de ~40-65h roadmap, ~31-37h entregue).
+**Caminho A soft: ~75% completo** (de ~40-65h roadmap, ~37-43h entregue).
 
 ## Pendente (Caminho A soft)
 
@@ -63,11 +65,10 @@ Não-objetivo agora — Caminho A soft é prioridade.
 |---|---|---|
 | E.2 | WebSocket push stats (`statsstream/matchhub`) — opcional | ~6-10h |
 | F.2 | Substituir `api_client.get_events` interno (post-FT) | ~1-2h |
-| G | Lineups via `/api/statsstream/<id>/info/aggregated/` | ~6-10h |
 | H | Remover `api_client.*` de runtime quente | ~4-6h |
 | I | Otimização + cache compartilhado + testes integração | ~8-15h |
 
-**Total restante:** ~25-43h em 4-7 sessões.
+**Total restante:** ~13-25h em 3-5 sessões.
 
 ## Fases Quant (longo prazo)
 

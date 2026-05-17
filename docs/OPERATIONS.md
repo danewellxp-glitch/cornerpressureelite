@@ -406,3 +406,113 @@ Types canônicos: `GOAL`, `YELL`, `RCRD`, `CRNR`, `OFFS`, `SUBS`, `PENL`,
 `data/providers/apifootball/events_adapter.py::_AF_TYPE_MAP`. Combinações
 não mapeadas viram fallback `af_type.upper()` + log WARNING — review
 semanal pra detectar tipos novos AF.
+
+
+## Fase G.1 — Lineups Betano operacional
+
+`BetanoLineupsWorker` captura `event.roster` (formation + startXI +
+benchPlayers + squad) do **mesmo** endpoint `/event/<id>/state` usado
+por E.1 e F (CASO α puro — zero nova request HTTP). **Dataset puro**
+— `decision_engine` NÃO consome; alimenta Quant H2-H4 (formation,
+qualidade XI, profundidade bench). Ativado em produção 2026-05-17.
+
+### Toggle `USE_BETANO_LINEUPS`
+
+Ativar:
+```bash
+grep -q "^USE_BETANO_LINEUPS" corner-pressure-elite/.env || \
+  echo 'USE_BETANO_LINEUPS=true' >> corner-pressure-elite/.env
+
+docker compose up -d --build main   # configs novas exigem REBUILD
+```
+
+Reverter:
+```bash
+sed -i '/^USE_BETANO_LINEUPS/d' corner-pressure-elite/.env
+docker compose up -d --force-recreate main
+```
+
+Confirmar wiring ativo:
+```bash
+docker logs cpes-main 2>&1 | grep -E "BetanoLineupsWorker|providers.lineups_stack" | head -3
+# Esperado:
+# providers.lineups_stack primary=bridge_betano fallback=apifootball bridge_url=...
+# BetanoLineupsWorker ativo — lineups via bridge (Fase G.1) max_minute=5
+```
+
+### Estratégia de captura (única vez por fixture, early-game)
+
+Lineups são **estáveis pós-confirmação** — worker captura no PRIMEIRO
+tick com `jogo.minuto <= LINEUPS_MAX_MINUTE` (default 5) e marca o
+fixture como capturado. Todos polls seguintes são no-op rápido
+(cache in-memory + `repo.exists_for_fixture` cobre restart).
+
+UNIQUE constraint `(fixture_id, source, team_side)` no schema 0007 é
+a última linha de defesa contra race (worker chamado 2× antes do
+cache popular). `upsert_batch` retorna `(inserted, skipped_dup)`.
+
+### Monitoramento
+
+Capturas das últimas 6h por source:
+```bash
+docker exec cpes-postgres psql -U cpes_user -d cpes -c \
+  "SELECT
+     source,
+     COUNT(*) AS rows,
+     COUNT(DISTINCT fixture_id) AS fixtures,
+     COUNT(*) FILTER (WHERE formation IS NOT NULL) AS with_formation,
+     COUNT(*) FILTER (WHERE coach_name IS NOT NULL) AS with_coach
+   FROM lineups_history
+   WHERE captured_at > NOW() - INTERVAL '6 hours'
+   GROUP BY source ORDER BY source;"
+```
+
+Saudável: `bridge_betano` dominante quando renewer alive. `coach_name`
+sempre NULL pra `bridge_betano` (gap conhecido — `BETANO_GAPS_LINEUPS`),
+preenchido apenas em entries com `source=apifootball`.
+
+Cobertura por liga + formation distribution:
+```bash
+docker exec cpes-postgres psql -U cpes_user -d cpes -c \
+  "SELECT source, formation, COUNT(*) AS n
+   FROM lineups_history
+   WHERE captured_at > NOW() - INTERVAL '24 hours'
+   GROUP BY source, formation ORDER BY n DESC LIMIT 20;"
+```
+
+Dedup funcionando (sempre 0 duplicates):
+```bash
+docker exec cpes-postgres psql -U cpes_user -d cpes -c \
+  "SELECT fixture_id, source, team_side, COUNT(*) AS dups
+   FROM lineups_history
+   GROUP BY 1,2,3 HAVING COUNT(*) > 1;"
+# Esperado: zero linhas
+```
+
+### Troubleshooting
+
+**Worker não aparece nos logs** (`BetanoLineupsWorker ativo` ausente):
+- Validar config visível no container: `docker exec cpes-main python3 -c "import config; print(config.USE_BETANO_LINEUPS)"`. Se `AttributeError`, rebuild com `docker compose up -d --build main`.
+
+**lineups_history vazia em jogo live:**
+- Worker só age em `minuto <= LINEUPS_MAX_MINUTE`. Verificar se o fixture chegou em alguma janela early (raro pra jogos que entram em monitoramento depois de min 5). Logs `betano_lineups_worker.skip_late` indicam fixture vindo tarde — comportamento esperado, NÃO bug.
+- Cobertura zero Betano (ex: ligas regionais sem `homeLineup`): Composite cai pra AF. Verificar log `composite_lineups.zero_coverage source=bridge_betano fixture=...`.
+
+**Player com `name='<unknown>'`** persistido (entries com `<unknown>` em `starting_eleven`):
+- Comportamento esperado (AJUSTE 1) — payload Betano teve entry sem `playerId` E sem `unknownPlayerId`. Logs `lineups.player_no_id fixture=...` indicam ocorrência. Investigar se virou padrão, pode sinalizar drift de schema.
+
+**Partial coverage warning** (`lineups.partial_coverage source=... home_ok=True away_ok=False`):
+- Esperado em alguns fixtures Betano onde só 1 lado tem `homeLineup` confirmado. NÃO aciona fallback (decisão de design) — AF teria mesma cobertura provavelmente. Monitorar frequência; se >20%, considerar refinar política Composite.
+
+### Lineups history schema rápido
+
+`lineups_history` (migration `0007_lineups_history.sql`) tem 12 colunas:
+- `fixture_id`, `source`, `team_side` ∈ `{home, away}` (CHECK)
+- `formation` (TEXT — "4-3-3", "5-4-1"; NULL se cobertura zero)
+- `coach_name` (TEXT — sempre NULL pra `bridge_betano`)
+- `starting_eleven` JSONB (`list[{player_id, name, position, position_display, shirt_number, is_substitute}]`)
+- `substitutes` JSONB (mesma shape, `is_substitute=true`)
+- `tactical_grid` JSONB (Betano `lineup[][]` preservando linhas táticas — `list[list[player_id]]`)
+- `version` INTEGER (snapshot version do payload)
+- `captured_at` TIMESTAMPTZ, `raw` JSONB (roster original preservado)
+- UNIQUE dedup `(fixture_id, source, team_side)` — 1 lineup por lado.

@@ -21,9 +21,12 @@ Fases planejadas + estado atual. Atualizado quando fase fecha ou nova é planeja
 - **Fase E.0** — Investigação técnica stats Betano (mapeamento `/danae-webapi/api/live/events/<id>/latest`, gotchas `X-Operator/X-Language`) — commit `5553934` 2026-05-16
 - **Fase E.1** — Stats Betano via bridge + Composite cascade Betano→AF. `USE_BETANO_STATS=true` em produção, smoke real validado (6 capturas bridge_betano + 12 AF fallback, version polling 4133→4222, latência 7-7.5s, decision_engine consumindo Score=7) — commit `1e3efca` 2026-05-17
 - **Fase F** — Eventos Betano via `event.incidents[]` (dataset puro). `BetanoEventsWorker` persiste em `events_history` paralelo ao pipeline live. CompositeEventsProvider Betano→AF. Smoke real validou 18 events via fallback AF (bridge renewer em warmup intermitente, source bridge_betano flippa quando recupera — mesma dinâmica E.1). Dedup UNIQUE comprovado, throttle 30s, decision_engine intocado. `USE_BETANO_EVENTS=true` ativo — commit `a65bfe6` 2026-05-17
+- **Fase G.0** — Investigação técnica lineups Betano + validação saúde renewer 24h. Schema descoberto inspecionando `event.roster` do `/event/<id>/state` (já capturado pela E.1) — CASO α puro confirmado, zero novo endpoint — commit `508147b` 2026-05-17
+- **Fase G.1** — Lineups Betano via `event.roster` (dataset puro). 6 commits: migration 0007 (`86da575`), Protocol+adapters+Composite (`4d388ab` + ajustes pós-review `a4ceb97`), Worker+configs+wiring (`223368d` + fix VAL 4 `9de2829`), suite 48 testes (`63cfd3a`). Decision_engine intocado, `USE_BETANO_LINEUPS=true` ativo. Smoke leve verde; smoke real assíncrono (sem jogos live no momento, capturas acontecem quando próximo lote começar) — 2026-05-17
 
 ## Em progresso
 
+- **Smoke real Fase G.1** — Validar captura `lineups_history` em jogo live com `minute<=5` (próximo lote 2026-05-17 10:30 BRT+)
 - **Smoke real D.0 + D.2** — Validar telemetria + matches em jogo de liga monitorada ao vivo (pendente overlap real)
 
 ## Próximas fases (Caminho A soft restante)
@@ -38,13 +41,8 @@ Fases planejadas + estado atual. Atualizado quando fase fecha ou nova é planeja
 - Substituir por `EventsHistoryRepo.get_by_type_in_window(fixture, 'CRNR')` quando dataset Betano comprovar cobertura ≥ AF empíricamente (~1-2 semanas de capturas).
 - Sem urgência — post-FT é cold path, AF cota baixa.
 
-### Fase G — Lineups Betano (~6-10h)
-- Investigar endpoint (provável: `/api/statsstream/<id>/info/aggregated/`)
-- Substituir `api_client.get_lineups()`
-- Persistir `lineups_history`
-
 ### Fase H — Refactor remover `api_client.*` de runtime (~4-6h)
-- Quando E.1 + F + F.2 + G prontos, AF vira só residual (discovery + resultado FT)
+- E.1 + F + G entregues. F.2 pendente. AF residual = discovery + resultado FT.
 
 ### Fase I — Otimização + cache + testes integração (~8-15h)
 
@@ -68,7 +66,7 @@ TODOs registrados durante fases anteriores (consolidar em sprint dedicado):
   * `BridgeStatsAdapter::_version_cache` + `_last_stats_cache` (Fase E.1)
   * `BridgeEventsAdapter::_event_id_cache` (Fase F)
 
-**Total Caminho A soft restante:** ~30-50h em 5-8 sessões.
+**Total Caminho A soft restante:** ~13-25h em 3-5 sessões (após G entregue: F.2 + H + I + cache compartilhado).
 
 ## Fases Caminho A hard (eliminar AF completamente)
 

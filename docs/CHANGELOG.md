@@ -17,6 +17,67 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-17 — Fase G.1: Lineups Betano via roster (implementação completa)
+
+**Contexto:** G.0 confirmou CASO α puro (schema em `event.roster` do `/event/<id>/state` já capturado pela E.1). G.1 implementa adapter + worker + persistência sem nova carga no renewer.
+
+**O que foi feito (6 commits + push):**
+
+**PARTE A — Persistência:**
+- Migration `0007_lineups_history.sql`: schema com `formation`, `coach_name`, `starting_eleven JSONB`, `substitutes JSONB`, `tactical_grid JSONB`, `version`, `captured_at`. UNIQUE `(fixture_id, source, team_side)`. CHECK `team_side IN (home, away)`.
+- `data/repositories/lineups_history.py`: `upsert_lineup`, `upsert_batch`, `get_by_fixture`, `exists_for_fixture`. Dedup via UNIQUE.
+
+**PARTE B — Providers (com 5 ajustes pós-review):**
+- `data/lineups_provider.py`: `PlayerEntry` + `CanonicalLineup` (com `has_starting_eleven` property) + `BETANO_GAPS_LINEUPS = frozenset({"coach_name"})` + `LineupsProvider` Protocol + `CompositeLineupsProvider` (cascade primário→fallback se `None` OU cobertura zero).
+- `BridgeLineupsAdapter`: cross-ref `lineup[][]` × `roster.players[id]` pra shirtNumber/position. Reusa `/event/<id>/state` (zero nova request HTTP).
+- `APIFootballLineupsAdapter`: AF `pos` G/D/M/F → canonical GK/DF/MF/FW. Coach preenchido (cobre gap Betano).
+- AJUSTES pós-review:
+  - AJUSTE 1: `_resolve_player` nunca descarta entry (preserva contagem de 11 mesmo sem ID), fallback `name='<unknown>'`.
+  - AJUSTE 2: AF `get_lineups(home_team_id=...)` resolve `team_side` via `team.id` (correto), fallback ordem com log debug.
+  - AJUSTE 3: `_map_position` loga WARNING quando posição não-mapeada (rastreia drift de schema).
+  - AJUSTE 4b: Composite loga `lineups.partial_coverage` WARNING quando home_ok != away_ok.
+  - AJUSTE 4c: bridge `_parse` loga DEBUG quando `coach_name=None` (gap conhecido).
+
+**PARTE C — Worker + wiring:**
+- `BetanoLineupsWorker.capture_if_needed(fixture_id, minute, home_team_id)`: cache duplo (in-memory + `repo.exists_for_fixture`), gate por `minute > max_minute`. Cache marcado SOMENTE quando: `repo.exists True` OR `insert.inserted>0`. NÃO marca em: `provider None`, `lineups []`, `inserted=0 all skipped`, `minute > max` (correção via VAL 4 — permite retry se minute vier com spike transiente).
+- Configs `USE_BETANO_LINEUPS=false` + `LINEUPS_MAX_MINUTE=5`.
+- Factory `build_lineups_provider`.
+- main.py wiring: `_capturar_lineups` em `_analisar_jogo` (depois de `_capturar_events`), `home_team_id` extraído defensivamente. Shutdown plugado pros 3 workers (E.1+F+G).
+
+**PARTE D — Testes:**
+- 5 arquivos, **48 testes** (alvo 16-18, **+270%**). Cobertura de todos AJUSTES (1-4) + 5 cenários VAL 4 (tabela cache).
+- Sanity baseline: 31 falhas em `rate_limiter/score/whatsapp/decision/backtest` são PRÉ-EXISTENTES (confirmado em HEAD~1 stashed). Zero regressão introduzida.
+
+**PARTE E — Smoke:**
+- ✅ Smoke LEVE (flag off): worker silencioso, zero capturas, stats/events continuam, migration 0007 aplicada no startup.
+- ⚠️ Smoke REAL parcial: init OK (`providers.lineups_stack primary=bridge_betano fallback=apifootball` + `BetanoLineupsWorker ativo max_minute=5`), mas sem jogos live no momento ("Sem jogos restantes hoje"). Próximo lote 2026-05-17 10:30 BRT (~11h adiante).
+- Decisão: **flag ON em produção**, smoke real assíncrono — capturas vão acontecer naturalmente quando jogos começarem amanhã. Worker é fire-and-forget, decision_engine intocado, risco baixo.
+
+**Achados operacionais:**
+- Bridge `/events/live` ainda intermitente (503 transient) — mesma dinâmica F. Composite cascade Betano→AF cobre transparente.
+- Bridge `/health`: 2/2 endpoints healthy. Cookie `_cfuvid` válido (uptime 15766s).
+- Shutdown que F deixou pendente (`_events_shutdown` armazenado mas não invocado) corrigido nesta sessão.
+
+**Hashes (em ordem):**
+- `86da575` — PARTE A migration + repo
+- `4d388ab` — PARTE B inicial (Protocol + 3 adapters + Composite)
+- `a4ceb97` — PARTE B ajustes 1-4
+- `223368d` — PARTE C worker + configs + wiring
+- `9de2829` — PARTE C fix VAL 4 (skip_late não cacheia)
+- `63cfd3a` — PARTE D suite 48 testes
+- `93c986e` — docs ROADMAP Fase J ON HOLD (paralelo)
+
+**Estado final:**
+- `USE_BETANO_LINEUPS=true` em produção, aguardando jogos pra primeira captura real.
+- Caminho A soft ~75% completo (D.0, D.1, D.2, D.2A, E.0, E.1, F, G).
+- Próximas fases: H (refactor remover AF runtime), I (otimização + cache), J ON HOLD (pré-jogo + estudo times), K (descontinuar AF).
+
+**Próximos passos:**
+- Smoke real assíncrono — review lineups_history quando jogos começarem (2026-05-17 10:30 BRT+).
+- Consolidar Fase G ✅ no ROADMAP após validar 1ª captura real.
+
+---
+
 ## 2026-05-17 — Fase G.0: Investigação técnica lineups Betano + validação renewer
 
 **Contexto:** Antes de implementar Fase G (lineups Betano), validar (1) saúde do renewer pós smoke instável da F, (2) endpoint real do payload de lineups.
