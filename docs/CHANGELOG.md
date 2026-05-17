@@ -17,6 +17,38 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-17 — PRIORIDADE 2: popular `betano_team_map` (Issue C resolvido)
+
+**Contexto:** Discovery worker logava 8 matches / 100+ events skipped por ciclo (~7-8% cobertura). Newcastle, West Ham, Bologna FC, Athletic Bilbao, Celta Vigo e outros não estavam mapeados Betano↔AF — fallback 100% AF pra esses jogos. Bloqueador implícito também pro SofaScore Event Resolver (que depende de AF teams pra fuzzy match com SofaScore).
+
+**O que foi feito:**
+
+- `data/scripts/populate_team_map.py` (novo): cruza AF `/teams?league=X&season=Y` (12 ligas top: Premier, La Liga, Serie A, Bundesliga, Ligue 1, Eredivisie, Liga Portugal, Champions, Europa, MLS, Argentina, Brasileirão B) contra `betano_team_name` sem AF (filtra Esports/Snow/Dexter/Sub-). Fuzzy match com rapidfuzz (ratio + token_sort, sem partial — partial causa muito falso positivo).
+- Dedup robusto: `best_for_betano: dict[bt_id, Proposal]` mantém maior confidence — DC United → DC United (1615, 0.94) **venceu** vs Auckland United FC (0.94); Inter Miami → Inter Miami (9568, 1.00) venceu vs Miami FC; Chicago Fire → Chicago Fire venceu vs Chicago Fire FC II.
+- Output: `/tmp/team_map_proposed.json` (109 proposals) + `/tmp/team_map_updates.sql` (50 auto-OK ≥0.90 confidence). 59 review entries triados manualmente — 3 aprovados (Athletic Bilbao→531, Celta Vigo→538, Union Saint-Gilloise→1393), 56 descartados (CF Monterrey vs Montreal, Floresta vs Nottingham Forest, FK Liepaja vs Ajax, etc. — todos falsos positivos por similitude superficial).
+- Applied: 53 UPDATEs (`af_league_fuzzy` + `af_league_fuzzy_manual`).
+
+**Resultado:**
+
+| métrica | antes | depois |
+|---|---|---|
+| Cobertura times com AF | 98/521 (18.8%) | **151/521 (29.0%)** |
+| Discovery match rate (1 ciclo) | 8/100+ (~7%) | **10/91 (11%)** |
+| Newcastle 1379337 | sem mapping | ✅ `discovery_team_id_lookup` conf=1.00 |
+| West Ham, Atletico Bilbao, Celta, etc. | sem AF | ✅ mapeados |
+
+Discovery worker pega map fresh em cold-start (cache); restart cpes-main aplica imediato. Cobertura efetiva de matches sobe relativamente mais do que cobertura absoluta porque jogos top têm 2 times com mapping (1 match = 1 par mapeado).
+
+**Bugs encontrados:**
+- Schema `betano_team_map` divergiu do playbook (sem `sofascore_team_id`/`league_id` cols) — script ajustado.
+- `APIFootballClient.get_teams()` não existe; usei `_request("teams", ...)` direto.
+- Container cpes-main sem `psql` — UPDATEs aplicados via `docker exec -i cpes-postgres`.
+- Renewer/Brave caiu de novo durante smoke (Brave fetch() TypeError, 40h uptime issue recorrente — pendência P4). Restart via `setsid` resolveu.
+
+**Estado final:** Issue C resolvido pra ligas top. Cobertura efetiva K.1 cascata em stats já passou de 33% pra ~100% enriched (medido nos 22 captures bridge_betano última hora). Pendência: re-rodar script periodicamente quando novas ligas/temporadas começam, e considerar popular `match_method='af_league_fuzzy_manual'` adicional na próxima sessão revisando os 56 descartados que possam ser revalidados em sequence.
+
+---
+
 ## 2026-05-17 — PRIORIDADE 1: cutover odds → `/event/<id>/state` (Bug 1 user resolvido)
 
 **Contexto:** Bug 1 (user): 100% das odds últimas 24h vinham via `apifootball` (1145 entradas). Bridge `/markets` retornava `text_len=0` consistentemente — anti-bot Cloudflare nukeou a rota legada `/live/_/<id>/`. CPES vende sinal de Over Escanteios + Cartões Amarelos; sem odds Betano = crise.
