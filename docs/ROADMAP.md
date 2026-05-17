@@ -60,6 +60,13 @@ TODOs registrados durante fases anteriores (consolidar em sprint dedicado):
 - **AF unmapped types**: review semanal dos logs `events_adapter.af.unmapped_type`
   + `unmapped_var` pra detectar tipos novos AF não cobertos (`_AF_TYPE_MAP`
   em `data/providers/apifootball/events_adapter.py`).
+- **Cleanup TTL nos dicts de throttle**: evictar fixtures não-acessados há
+  > 2h (containers long-running vazam memória lenta sem isso). Dicts
+  afetados:
+  * `main.py::_last_capture_at` (odds telemetria — Fase D.0)
+  * `main.py::_last_events_capture_at` (events captura — Fase F)
+  * `BridgeStatsAdapter::_version_cache` + `_last_stats_cache` (Fase E.1)
+  * `BridgeEventsAdapter::_event_id_cache` (Fase F)
 
 **Total Caminho A soft restante:** ~30-50h em 5-8 sessões.
 

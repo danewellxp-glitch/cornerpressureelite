@@ -912,13 +912,20 @@ class CornerPressureElite:
     async def _capturar_events(self, fixture: Dict, jogo) -> None:
         """Captura events do fixture via BetanoEventsWorker (Fase F).
 
-        Throttle por fixture via EVENTS_POLL_INTERVAL_SEC. Resolve
-        home_team_id do raw fixture pra repassar ao adapter AF (caso
-        Composite caia em fallback). betano_event_id resolvido via repo
-        do próprio adapter — não passamos hint aqui.
+        Throttle por fixture via `EVENTS_POLL_INTERVAL_SEC` (default 30s).
+        Resolve `home_team_id` do raw fixture pra repassar ao adapter AF
+        (caso Composite caia em fallback). `betano_event_id` resolvido via
+        repo do próprio adapter — não passamos hint aqui.
 
         Fire-and-forget: exceções dentro do worker viram log warning, não
         re-raise. Dedup natural via UNIQUE constraint absorve dup.
+
+        **Trade-off throttle 30s:** evento individual (gol, cartão) pode
+        aparecer em `events_history` com defasagem de até 30s do real-time.
+        Aceitável pra dataset histórico (auditoria pós-jogo, modelos H2-H4).
+        Insuficiente se `decision_engine` futuro precisar reagir a eventos
+        em tempo real — exigirá refactor (poll dedicado, menor intervalo, ou
+        WebSocket Fase E.2).
         """
         if self.events_worker is None:
             return
@@ -926,13 +933,20 @@ class CornerPressureElite:
         now_ts = time.time()
         if (now_ts - last_ts) < config.EVENTS_POLL_INTERVAL_SEC:
             return
-        teams = fixture.get("teams", {}) or {}
-        home = teams.get("home") if isinstance(teams, dict) else {}
-        home_team_id = home.get("id") if isinstance(home, dict) else None
-        await self.events_worker.capture(
-            jogo.id,
-            home_team_id=home_team_id if isinstance(home_team_id, int) else None,
-        )
+        # Defensivo: fixture mal-formado (teams=None vs ausente) não pode
+        # crashar o worker. Try/except > .get() chain pra cobrir TypeError.
+        try:
+            home_team_id_raw = fixture["teams"]["home"]["id"]
+            home_team_id = (
+                home_team_id_raw if isinstance(home_team_id_raw, int) else None
+            )
+        except (KeyError, TypeError, AttributeError):
+            home_team_id = None
+            logger.debug(
+                "events.home_team_id_unresolved fixture_id=%s",
+                (fixture.get("fixture") or {}).get("id", "?"),
+            )
+        await self.events_worker.capture(jogo.id, home_team_id=home_team_id)
         self._last_events_capture_at[jogo.id] = now_ts
 
     def _build_canonical_fixture(self, jogo) -> CanonicalFixture:
