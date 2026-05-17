@@ -2099,3 +2099,180 @@ async def _handle_strategy_command(sender: str, message_body: str) -> dict:
 
     logger.info(f"[STRATEGY] User {user.id} ({user.full_name}) -> {market}={tier}")
     return {"status": "ok", "command": "strategy", "user_id": user.id, "tier": tier, "market": market}
+
+
+# ============= Banca per-user (Sprint M) =============
+
+from data.repositories.banca import BancaRepo  # noqa: E402
+
+
+async def _get_banca_repo() -> BancaRepo:
+    db = Database()
+    await db.connect()
+    return BancaRepo(db.pool)
+
+
+@app.get("/api/banca")
+async def api_banca_summary(current_user: User = Depends(require_paid_subscription)):
+    """Estado atual da banca + stats. configured=false se nunca setup."""
+    repo = await _get_banca_repo()
+    summary = await repo.get_summary(current_user.id)
+    if not summary:
+        return {
+            "configured": False,
+            "banca_inicial_cents": 0,
+            "banca_atual_cents": 0,
+        }
+    return summary
+
+
+@app.get("/api/banca/series")
+async def api_banca_series(
+    days: int = 30,
+    current_user: User = Depends(require_paid_subscription),
+):
+    days = max(1, min(days, 365))
+    repo = await _get_banca_repo()
+    return {"days": days, "series": await repo.series(current_user.id, days=days)}
+
+
+@app.get("/api/banca/movements")
+async def api_banca_movements(
+    tipo: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 100,
+    current_user: User = Depends(require_paid_subscription),
+):
+    page = max(1, page)
+    page_size = max(1, min(page_size, 500))
+    repo = await _get_banca_repo()
+    return await repo.list_movements(current_user.id, tipo=tipo, page=page, page_size=page_size)
+
+
+@app.post("/api/banca/setup")
+async def api_banca_setup(
+    body: dict,
+    current_user: User = Depends(require_paid_subscription),
+):
+    initial = int(body.get("initial_cents", 0))
+    if initial <= 0:
+        raise HTTPException(400, "initial_cents > 0 obrigatorio")
+    repo = await _get_banca_repo()
+    return await repo.setup(
+        current_user.id,
+        initial_cents=initial,
+        unit_pct=body.get("unit_pct"),
+        max_loss_per_day_cents=body.get("max_loss_per_day_cents"),
+        max_bets_per_day=body.get("max_bets_per_day"),
+    )
+
+
+@app.post("/api/banca/movements")
+async def api_banca_add_movement(
+    body: dict,
+    current_user: User = Depends(require_paid_subscription),
+):
+    tipo = body.get("tipo")
+    valor = body.get("valor_cents")
+    if tipo not in {"deposit", "withdraw", "correction"}:
+        raise HTTPException(400, "tipo deve ser deposit|withdraw|correction")
+    if not isinstance(valor, int) or valor == 0:
+        raise HTTPException(400, "valor_cents int != 0 obrigatorio")
+    repo = await _get_banca_repo()
+    try:
+        return await repo.add_movement(
+            current_user.id,
+            tipo=tipo,
+            valor_cents=valor,
+            descricao=body.get("descricao"),
+            motivo=body.get("motivo"),
+        )
+    except LookupError:
+        raise HTTPException(409, "banca nao configurada — chame POST /banca/setup primeiro")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/banca/reset")
+async def api_banca_reset(
+    body: Optional[dict] = None,
+    current_user: User = Depends(require_paid_subscription),
+):
+    motivo = (body or {}).get("motivo")
+    repo = await _get_banca_repo()
+    try:
+        return await repo.reset(current_user.id, motivo=motivo)
+    except LookupError:
+        raise HTTPException(409, "banca nao configurada")
+
+
+# ============= User signal decisions (Sprint M) =============
+
+from data.repositories.user_signal_decisions import UserSignalDecisionsRepo  # noqa: E402
+
+
+async def _get_decisions_repo() -> UserSignalDecisionsRepo:
+    db = Database()
+    await db.connect()
+    return UserSignalDecisionsRepo(db.pool)
+
+
+@app.post("/api/signals/{signal_id}/decision")
+async def api_signal_decide(
+    signal_id: int,
+    body: dict,
+    current_user: User = Depends(require_paid_subscription),
+):
+    """Marca decisao do user sobre um sinal: entered (com odd+valor) ou skipped."""
+    decision = body.get("decision")
+    if decision not in {"entered", "skipped"}:
+        raise HTTPException(400, "decision deve ser 'entered' ou 'skipped'")
+    repo = await _get_decisions_repo()
+    try:
+        result = await repo.decide(
+            current_user.id,
+            signal_id,
+            decision=decision,
+            odd_entrada=body.get("odd_entrada"),
+            valor_apostado_cents=body.get("valor_apostado_cents"),
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    # Se entered, gera movimento de stake na banca (debita pra "reservar").
+    # Movement bet_loss negativo de stake; se resultado vier GREEN depois,
+    # geramos bet_win positivo com payout. Garantia atomica fica no settle().
+    if decision == "entered":
+        try:
+            banca_repo = await _get_banca_repo()
+            await banca_repo.add_movement(
+                current_user.id,
+                tipo="bet_loss",   # debita stake (otimista; settle compensa em GREEN)
+                valor_cents=-(body.get("valor_apostado_cents") or 0),
+                bet_id=result["id"],
+                descricao=f"Stake signal #{signal_id}",
+                motivo="entered",
+            )
+        except (LookupError, ValueError) as e:
+            # Banca nao configurada ou saldo insuficiente — decision continua
+            # registrada mas avisa. UI deve mostrar warning.
+            log = logging.getLogger("cpes.api.decision")
+            log.warning(f"user {current_user.id} entered signal {signal_id} but banca move falhou: {e}")
+    return result
+
+
+@app.get("/api/users/me/stats")
+async def api_user_stats(current_user: User = Depends(require_paid_subscription)):
+    """Stats user-scoped (winrate/ROI/etc) — vem de user_signal_decisions."""
+    repo = await _get_decisions_repo()
+    return await repo.compute_user_stats(current_user.id)
+
+
+@app.get("/api/users/me/signals")
+async def api_user_signals(
+    limit: int = 100,
+    current_user: User = Depends(require_paid_subscription),
+):
+    """Sinais recentes JOIN com decision do user (cria 'pending' se faltar)."""
+    repo = await _get_decisions_repo()
+    return await repo.list_signals_with_decision(current_user.id, limit=limit)
