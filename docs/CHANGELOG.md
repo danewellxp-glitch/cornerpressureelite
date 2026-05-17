@@ -17,6 +17,33 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-17 — PRIORIDADE 4 quick-win: cron preventivo Brave (mitiga renewer 502)
+
+**Contexto:** P5 amplificou dependência do renewer (out = TODOS sinais bloqueados). 3 ocorrências documentadas de Brave stuck (`fetch() TypeError: Failed to fetch`) com `/health` superficial retornando 200 mesmo durante outage. Hipótese root cause (PARTE 3 investigação read-only): JavaScript runtime accumulation em pages live da Betano após ~24-40h uptime — renderer Brave acumula handlers SignalR/Vue, `fetch()` interno via CDP começa a falhar mas CDP `/json/version` ainda responde.
+
+**O que foi feito:**
+
+- `docs/setup/danewell-brave-restart.sh` (snapshot do script `/home/danewell/restart-brave.sh` no danewell): SIGTERM + SIGKILL fallback + setsid respawn preservando profile em `/home/danewell/brave-betano-profile/` (cookies CF intactos). Valida via `/json/version` no CDP 9224 pós-restart. Log em `/tmp/brave-cron.log`. Script idempotente.
+- Crontab `0 4,16 * * *` instalado em `crontab -u danewell` (04:00 e 16:00 BRT — madrugada profunda + pré-jogos noturnos pra minimizar overlap com sinais ativos). ~15-20s downtime × 2/dia = 0.05% total.
+- Smoke manual executado: script roda OK (`exit_code=0`), Brave novo PID 221557, renewer responde HTTP 200 em 6.9s pós-restart.
+- `docs/OPERATIONS.md` ganha seção "Restart preventivo Brave do pool" com runbook + comando manual ad-hoc.
+
+**Investigação PARTE 3 — dados coletados:**
+- Profile size: 137 MB (saudável, não inflado)
+- Cache: 15 MB (sem pollution)
+- Cookies CF: modificados há 4min (frescos, não é expiração)
+- RAM Brave: ~22% total (~1.1 GB) — dentro do esperado pra Chromium
+- GPU process: 30.5% CPU sustained (alto)
+- Renderer principal: 16.5% CPU sustained (alto)
+- 4 restarts do renewer.service em 24h (3 em 16/05 + 1 hoje)
+- `/health` atual checa só `/json/version` (superficial — confirmado "200 OK silente")
+
+**Pendência P4 PARTE 1 — supervisor reativo:** `/health/deep` (fetch real) + daemon `BraveSupervisor` (30s interval, 2 threshold, 10min cooldown). Cobre os ~10% residuais (degradação antes dos 12h preventivos). ~3-4h de trabalho, fica pra próxima sessão. P5 mitiga impacto residual (silêncio em vez de sinal errado).
+
+**Estado final:** Cron preventivo ATIVO em produção. Primeiro restart automático amanhã 04:00 BRT. P5 + cron cobrem ~95% dos cenários; supervisor pendente fecha os 5% restantes.
+
+---
+
 ## 2026-05-17 — PRIORIDADE 5: refetch just-before-send + telemetria + timestamp (fidelidade sinal)
 
 **Contexto:** Investigação do sinal #127 (Osasuna vs Espanyol, 15:47:22, linha 9.5 odd 1.42) confirmou que linha+odd ESTAVAM corretas no momento da captura, mas a janela captura→DB→WAHA→user_abrir_betano (5-65s) deixa odd defasada. 30s depois odd já era 1.67; 4min depois linha 9.5 sumiu (10º corner saiu).

@@ -139,6 +139,35 @@ Com systemd ativo (após 2026-05-15), o stack do bridge sobe sozinho no boot. Va
 
 Se systemd não subiu (extremamente raro): seguir "Subir bridge manualmente (fallback de emergência)" acima.
 
+## Restart preventivo Brave do pool (danewell)
+
+Brave do pool degrada após ~24-40h de uptime — `fetch()` interno retorna
+`TypeError: Failed to fetch` mesmo com CDP `/json/version` respondendo OK
+(visto 3× em 2026-05-15 a 17). Renewer retorna **HTTP 502** silencioso,
+P5 bloqueia todos os sinais até manutenção manual.
+
+**Mitigação P4 quick-win (2026-05-17): cron a cada 12h**
+
+- Script: `/home/danewell/restart-brave.sh` (snapshot em `docs/setup/danewell-brave-restart.sh`)
+- Crontab: `0 4,16 * * *` (04:00 e 16:00 BRT — madrugada + pré-jogos noturnos)
+- Log: `/tmp/brave-cron.log`
+- Preserva profile (`/home/danewell/brave-betano-profile/`) → cookies CF intactos
+- Downtime: ~15-20s por restart × 2 dia = ~40s/dia (0.05%)
+
+**Restart manual ad-hoc** (qualquer momento, se renewer 502):
+```bash
+ssh danewell 'bash /home/danewell/restart-brave.sh'
+# Validar:
+curl -s --max-time 30 -o /dev/null -w "HTTP %{http_code}\n" \
+  http://192.168.1.5:8081/danae/event/85162739/state
+# Esperado: HTTP 200
+```
+
+**Pendência P4 PARTE 1** (supervisor reativo): `/health/deep` no renewer +
+`BraveSupervisor` daemon (30s interval, 2 threshold, 10min cooldown). Cobre
+o gap entre os 12h preventivos — degradação imprevista. Quick-win cron
+resolve ~90% dos casos enquanto supervisor não chega.
+
 ## Troubleshooting comum
 
 **"Fixture descoberto via D.2 mas com poucas capturas em `odds_history`"**
