@@ -137,17 +137,32 @@ async def get_live_state() -> dict:
     }
 
 async def get_upcoming_games() -> dict:
-    """Retorna próximos jogos programados lendo do PostgreSQL."""
+    """Retorna próximos jogos programados lendo do PostgreSQL.
+
+    Filtra:
+    - timestamp > 6300s no passado (~1h45 — janela total estimada do match).
+    - jogos cujo `id` ja esta em live_state (pre_janela ∪ na_janela ∪ pos_janela).
+      Sem este filtro, partidas que iniciaram continuavam em "proximos" ate
+      o cap de 1h45min, confundindo o dashboard.
+    """
     try:
         data = await db_reader.get_state("upcoming_games")
         import time
         if data:
             now = time.time()
+            live_state = await db_reader.get_state("live_state") or {}
+            live_ids = {
+                g.get("id")
+                for fase in ("pre_janela", "na_janela", "pos_janela")
+                for g in (live_state.get(fase) or [])
+                if g.get("id")
+            }
             proximos = []
             for game in data.get("proximos", []):
                 ts = game.get("timestamp", 0)
                 if not ts: continue
                 if ts + 6300 < now: continue
+                if game.get("id") in live_ids: continue
                 game["minutos_ate"] = max(0, int((ts - now) / 60))
                 proximos.append(game)
             return {
