@@ -37,6 +37,24 @@ def _serialize_players(players: list) -> str:
     )
 
 
+def _serialize_missing(missing: list) -> str:
+    """list[MissingPlayer] → JSONB string. K.1 PARTE B.6."""
+    return json.dumps(
+        [
+            {
+                "player_id": m.player_id,
+                "name": m.name,
+                "reason": m.reason,
+                "reason_code": m.reason_code,
+                "expected_return": m.expected_return.isoformat() if m.expected_return else None,
+                "source": m.source,
+            }
+            for m in (missing or [])
+        ],
+        ensure_ascii=False,
+    )
+
+
 class LineupsHistoryRepo:
     def __init__(self, pool):
         self._pool = pool
@@ -49,10 +67,10 @@ class LineupsHistoryRepo:
                 INSERT INTO lineups_history
                   (fixture_id, source, team_side, formation, coach_name,
                    starting_eleven, substitutes, tactical_grid,
-                   version, raw)
+                   version, raw, missing_players)
                 VALUES ($1, $2, $3, $4, $5,
                         $6::jsonb, $7::jsonb, $8::jsonb,
-                        $9, $10::jsonb)
+                        $9, $10::jsonb, $11::jsonb)
                 ON CONFLICT (fixture_id, source, team_side) DO NOTHING
                 RETURNING id
                 """,
@@ -66,6 +84,7 @@ class LineupsHistoryRepo:
                 json.dumps(lineup.tactical_grid or [], ensure_ascii=False),
                 lineup.version,
                 json.dumps(lineup.raw or {}, ensure_ascii=False),
+                _serialize_missing(lineup.missing_players),
             )
         return row is not None
 
@@ -84,10 +103,10 @@ class LineupsHistoryRepo:
                         INSERT INTO lineups_history
                           (fixture_id, source, team_side, formation, coach_name,
                            starting_eleven, substitutes, tactical_grid,
-                           version, raw)
+                           version, raw, missing_players)
                         VALUES ($1, $2, $3, $4, $5,
                                 $6::jsonb, $7::jsonb, $8::jsonb,
-                                $9, $10::jsonb)
+                                $9, $10::jsonb, $11::jsonb)
                         ON CONFLICT (fixture_id, source, team_side) DO NOTHING
                         RETURNING id
                         """,
@@ -98,6 +117,7 @@ class LineupsHistoryRepo:
                         json.dumps(ln.tactical_grid or [], ensure_ascii=False),
                         ln.version,
                         json.dumps(ln.raw or {}, ensure_ascii=False),
+                        _serialize_missing(ln.missing_players),
                     )
                     if row is not None:
                         inserted += 1
@@ -110,7 +130,7 @@ class LineupsHistoryRepo:
                 """
                 SELECT id, fixture_id, source, team_side, formation, coach_name,
                        starting_eleven, substitutes, tactical_grid,
-                       version, captured_at, raw
+                       version, captured_at, raw, missing_players
                   FROM lineups_history
                  WHERE fixture_id = $1
                  ORDER BY source ASC, team_side ASC

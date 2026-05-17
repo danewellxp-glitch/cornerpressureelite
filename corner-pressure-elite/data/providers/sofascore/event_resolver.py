@@ -181,6 +181,11 @@ def _fuzzy_match(
                     (sofa_kickoff - kickoff_at_aware).total_seconds() / 60
                 )
                 if delta_min > _KICKOFF_WINDOW_MIN:
+                    log.debug(
+                        "event_resolver.skipped_by_kickoff "
+                        "sofa_event=%s home=%r away=%r delta_min=%.1f",
+                        ev_id, ev_home, ev_away, delta_min,
+                    )
                     continue
 
         if combined >= _FUZZ_THRESHOLD:

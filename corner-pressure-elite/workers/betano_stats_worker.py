@@ -182,4 +182,5 @@ def _to_entry(
         yellow_last_10min=snap.yellow_last_10min,
         captured_at=captured_at,
         raw=raw_with_freshness,
+        enriched_by=snap.enriched_by,
     )

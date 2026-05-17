@@ -151,6 +151,12 @@ class CornerPressureElite:
         # Quant H2-H4 (formation, qualidade XI, profundidade bench).
         self.lineups_worker: Optional[BetanoLineupsWorker] = None
         self._lineups_shutdown = None
+        # SofaScore stack (Fase K.1). Só inicializa quando USE_SOFASCORE=true.
+        # Cliente HTTP com curl_cffi impersonate Chrome (bypass JA3 anti-bot).
+        # Atua como fallback intermediário dos Composites (Betano primary →
+        # SofaScore → AF super-residual) e enriquecedor de coach/missing_players.
+        self.sofa_client = None
+        self.sofa_event_resolver = None
         # Última captura de telemetria por (fixture_id, market) -> timestamp ms.
         self._last_capture_at: Dict[tuple, int] = {}
         self._running = False
@@ -243,6 +249,74 @@ class CornerPressureElite:
             )
             logger.info("CompositeOddsProvider ativo (bridge Betano primário)")
 
+            # Fase K.1: SofaScore stack (fallback intermediário + enriquecedor).
+            # Inicializado UMA vez aqui, compartilhado entre stats/events/lineups.
+            sofa_stats_adapter = None
+            sofa_events_adapter = None
+            sofa_lineups_adapter = None
+            if config.USE_SOFASCORE:
+                from data.providers.sofascore.client import SofaScoreClient
+                from data.providers.sofascore.event_resolver import SofaScoreEventResolver
+                from data.providers.sofascore.stats_adapter import SofaScoreStatsAdapter
+                from data.providers.sofascore.events_adapter import SofaScoreEventsAdapter
+                from data.providers.sofascore.lineups_adapter import SofaScoreLineupsAdapter
+
+                self.sofa_client = SofaScoreClient(
+                    timeout=config.SOFASCORE_TIMEOUT_SEC,
+                    rate_limit_per_sec=config.SOFASCORE_RATE_LIMIT_PER_SEC,
+                    impersonate=config.SOFASCORE_IMPERSONATE,
+                )
+                await self.sofa_client.start()
+                self.sofa_event_resolver = SofaScoreEventResolver(
+                    client=self.sofa_client,
+                    fixture_map_repo=fixture_repo,
+                )
+                sofa_stats_adapter = SofaScoreStatsAdapter(
+                    client=self.sofa_client,
+                    event_id_resolver=self.sofa_event_resolver.resolve,
+                )
+                sofa_events_adapter = SofaScoreEventsAdapter(
+                    client=self.sofa_client,
+                    event_id_resolver=self.sofa_event_resolver.resolve,
+                )
+                sofa_lineups_adapter = SofaScoreLineupsAdapter(
+                    client=self.sofa_client,
+                    event_id_resolver=self.sofa_event_resolver.resolve,
+                )
+                logger.info(
+                    "providers.sofascore_stack enabled enrichment=%s rate_limit=%d/s",
+                    config.ENABLE_SOFASCORE_ENRICHMENT,
+                    config.SOFASCORE_RATE_LIMIT_PER_SEC,
+                )
+            else:
+                logger.info(
+                    "providers.sofascore_stack disabled (USE_SOFASCORE=false)"
+                )
+
+            # Reconstrói composite_stats em K.1 mode quando SofaScore ativo:
+            # primary=Bridge (mantido), fallback_intermediate=SofaScore,
+            # fallback_final=AF (super-residual). Sem SofaScore, mantém legado.
+            if sofa_stats_adapter is not None and composite_stats is not None:
+                from data.stats_provider import CompositeStatsProvider
+                legacy_providers = list(composite_stats._providers)
+                primary = legacy_providers[0] if legacy_providers else None
+                af_residual = None
+                if config.AF_SUPER_RESIDUAL_ENABLED and len(legacy_providers) >= 2:
+                    af_residual = legacy_providers[1]
+                composite_stats = CompositeStatsProvider(
+                    primary=primary,
+                    fallback_intermediate=sofa_stats_adapter,
+                    fallback_final=af_residual,
+                    enable_enrichment=config.ENABLE_SOFASCORE_ENRICHMENT,
+                )
+                logger.info(
+                    "composite_stats.k1_mode primary=%s intermediate=sofascore "
+                    "final=%s enrichment=%s",
+                    getattr(primary, "name", "?"),
+                    "apifootball" if af_residual else "none",
+                    config.ENABLE_SOFASCORE_ENRICHMENT,
+                )
+
             # Fase E.1 PARTE F': stats Betano via worker (bridge + AF fallback)
             if USE_BETANO_STATS:
                 stats_history_repo = StatsHistoryRepo(self.database.pool)
@@ -267,6 +341,20 @@ class CornerPressureElite:
                     api_client=self.api_client,
                     fixture_repo=fixture_repo,
                 )
+                # K.1: insere SofaScore como fallback intermediário entre
+                # bridge_betano e apifootball. CompositeEventsProvider é
+                # cascade pura — basta reordenar a lista.
+                if sofa_events_adapter is not None and composite_events is not None:
+                    from data.events_provider import CompositeEventsProvider
+                    legacy = list(composite_events._providers)
+                    bridge = legacy[0] if legacy else None
+                    af = legacy[1] if len(legacy) >= 2 and config.AF_SUPER_RESIDUAL_ENABLED else None
+                    new_providers = [p for p in (bridge, sofa_events_adapter, af) if p is not None]
+                    composite_events = CompositeEventsProvider(new_providers)
+                    logger.info(
+                        "composite_events.k1_cascade providers=%s",
+                        [p.name for p in new_providers],
+                    )
                 events_repo = EventsHistoryRepo(self.database.pool)
                 self.events_worker = BetanoEventsWorker(
                     provider=composite_events,
@@ -284,6 +372,20 @@ class CornerPressureElite:
                     api_client=self.api_client,
                     fixture_repo=fixture_repo,
                 )
+                # K.1: SofaScore como ENRICHER (coach + missing_players,
+                # gaps Betano). Chamada paralela em todo tick — falha silenciosa.
+                if sofa_lineups_adapter is not None and composite_lineups is not None:
+                    from data.lineups_provider import CompositeLineupsProvider
+                    legacy = list(composite_lineups._providers)
+                    composite_lineups = CompositeLineupsProvider(
+                        legacy,
+                        enricher=sofa_lineups_adapter,
+                        enable_enrichment=config.ENABLE_SOFASCORE_ENRICHMENT,
+                    )
+                    logger.info(
+                        "composite_lineups.k1_enricher providers=%s enricher=sofascore",
+                        [p.name for p in legacy],
+                    )
                 lineups_repo = LineupsHistoryRepo(self.database.pool)
                 self.lineups_worker = BetanoLineupsWorker(
                     provider=composite_lineups,
@@ -1808,6 +1910,12 @@ class CornerPressureElite:
             await self._events_shutdown()
         if self._lineups_shutdown is not None:
             await self._lineups_shutdown()
+        if self.sofa_client is not None:
+            try:
+                await self.sofa_client.close()
+                logger.info("sofascore.client.closed")
+            except Exception as e:
+                logger.warning(f"Erro fechando sofascore.client: {e}")
         if self.odds_persistence_worker is not None:
             await self.odds_persistence_worker.stop()
             logger.info("OddsPersistenceWorker parado")
