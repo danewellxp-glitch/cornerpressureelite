@@ -9,7 +9,7 @@ API_FOOTBALL_BASE_URL = "https://v3.football.api-sports.io"
 API_DAILY_LIMIT = int(os.getenv("API_DAILY_LIMIT", "7500"))
 
 # --- Polling ---
-POLLING_INTERVAL = 60  # segundos entre ciclos
+POLLING_INTERVAL = 30  # segundos entre ciclos (era 60; reduzido 2026-05-17 — SofaScore primary, AF tem folga)
 STATUS_CHECK_INTERVAL = 300  # verificar status da API a cada 5 min
 
 # --- Janela de Monitoramento ---

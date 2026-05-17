@@ -520,8 +520,8 @@ class CornerPressureElite:
         new_enabled = bool(cfg.get("enabled", False))
         was_enabled = self.dev_mode_enabled
 
-        normal_polling = int(cfg.get("normal_polling_interval", 60))
-        normal_status = int(cfg.get("normal_status_check_interval", 300))
+        normal_polling = int(cfg.get("normal_polling_interval", POLLING_INTERVAL))
+        normal_status = int(cfg.get("normal_status_check_interval", STATUS_CHECK_INTERVAL))
         normal_daily = int(cfg.get("normal_api_daily_limit", 7500))
 
         if new_enabled:
