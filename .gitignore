@@ -15,8 +15,9 @@ dist/
 build/
 .pytest_cache/
 
-# Logs
-logs/
+# Logs (apenas backend Python — global `logs/` capturava por acidente
+# pastas de rota Next.js com mesmo nome em dashboard/)
+corner-pressure-elite/logs/
 
 # Node
 node_modules/
