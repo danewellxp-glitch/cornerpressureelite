@@ -303,3 +303,106 @@ tail -50 ~/cpes-bridge/bridge.log | grep "event_state.*status=200" | tail -5
 - Fase E.1: `version` (snapshot Betano), `second_since_start` (clock granular), `corners_last_5/10min`, `yellow_last_5/10min` (janelas calculadas pelo `StatsWindowCalculator`)
 - `raw->>'freshness'` ∈ `{'fresh', 'cached'}` pra auditoria de cache hits
 - UNIQUE parcial `(fixture_id, source, version) WHERE version IS NOT NULL` previne dup de mesma versão Betano (defesa contra race do bridge cache).
+
+## Fase F — Events Betano operacional
+
+`BetanoEventsWorker` captura `event.incidents[]` do mesmo endpoint
+`/event/<id>/state` usado pelo `BridgeStatsAdapter` (E.1). **Dataset puro**
+— `decision_engine` NÃO consome, persistência paralela alimenta Quant
+H1-H4. Ativado em produção 2026-05-17.
+
+### Toggle `USE_BETANO_EVENTS`
+
+Ativar:
+```bash
+grep -q "^USE_BETANO_EVENTS" corner-pressure-elite/.env || \
+  echo 'USE_BETANO_EVENTS=true' >> corner-pressure-elite/.env
+
+# IMPORTANTE: configs novas em config.py exigem REBUILD (não só recreate)
+docker compose up -d --build main
+```
+
+Reverter:
+```bash
+sed -i '/^USE_BETANO_EVENTS/d' corner-pressure-elite/.env
+docker compose up -d --force-recreate main
+```
+
+Confirmar wiring ativo:
+```bash
+docker logs cpes-main 2>&1 | grep -E "BetanoEventsWorker|providers.events_stack" | head -3
+# Esperado:
+# providers.events_stack primary=bridge_betano fallback=apifootball bridge_url=...
+# BetanoEventsWorker ativo — events via bridge (Fase F)
+```
+
+### Monitoramento
+
+Capturas por source × type na última hora:
+```bash
+docker exec cpes-postgres psql -U cpes_user -d cpes -c \
+  "SELECT source, event_type, COUNT(*) AS events
+   FROM events_history
+   WHERE captured_at > NOW() - INTERVAL '1 hour'
+   GROUP BY source, event_type
+   ORDER BY source, event_type;"
+```
+
+Saudável: `bridge_betano` dominante quando renewer alive, `apifootball`
+durante warmup ou degradação.
+
+Dedup funcionando (sempre 0 duplicates):
+```bash
+docker exec cpes-postgres psql -U cpes_user -d cpes -c \
+  "SELECT fixture_id, source, event_type, event_minute, team_side, COUNT(*) AS dups
+   FROM events_history
+   WHERE captured_at > NOW() - INTERVAL '1 hour'
+   GROUP BY 1,2,3,4,5
+   HAVING COUNT(*) > 1;"
+# Esperado: zero linhas
+```
+
+### Rebuild vs recreate (gotcha)
+
+**Configs novas em `config.py` exigem rebuild da imagem.** `docker compose
+up -d --force-recreate main` só recria o container com a mesma imagem —
+configs novas no `config.py` ficam invisíveis (`AttributeError: module
+'config' has no attribute 'USE_BETANO_EVENTS'`).
+
+Sintoma típico: container sobe sem erro, mas `BetanoEventsWorker ativo`
+não aparece nos logs apesar de `USE_BETANO_EVENTS=true` no env. Validação:
+```bash
+docker exec cpes-main python3 -c "import config; print(config.USE_BETANO_EVENTS)"
+# Se AttributeError: precisa rebuild
+```
+
+**Fix:**
+```bash
+docker compose up -d --build main
+```
+
+### Throttle 30s e implicação
+
+`EVENTS_POLL_INTERVAL_SEC=30` (default) significa: evento individual pode
+aparecer em `events_history` com defasagem de até 30s do real-time.
+Aceitável pra dataset histórico (auditoria pós-jogo, H2-H4). Insuficiente
+se `decision_engine` futuro precisar reagir a eventos em tempo real —
+exigirá refactor (poll dedicado, intervalo menor, OU WebSocket Fase E.2).
+
+### Events history schema rápido
+
+`events_history` (migration `0006_events_history.sql`) tem 11 colunas:
+- `fixture_id`, `source`, `event_type`, `event_minute`, `event_second` (opt)
+- `team_side` ∈ `{home, away, NULL}` (CHECK constraint)
+- `player_name` (opt — só AF preenche atualmente)
+- `props` JSONB, `raw` JSONB (incident original preservado)
+- `captured_at`
+- UNIQUE dedup `(fixture, source, type, minute, side, player)` — dedup
+  natural via `ON CONFLICT DO NOTHING` no `upsert_batch`.
+
+Types canônicos: `GOAL`, `YELL`, `RCRD`, `CRNR`, `OFFS`, `SUBS`, `PENL`,
+`PBEG`, `PEND`, `EBEG`, `StoppageTime`, `Aggregated`, `VAR`, `CGOL`
+(gol cancelado). Mapping AF → canônico em
+`data/providers/apifootball/events_adapter.py::_AF_TYPE_MAP`. Combinações
+não mapeadas viram fallback `af_type.upper()` + log WARNING — review
+semanal pra detectar tipos novos AF.

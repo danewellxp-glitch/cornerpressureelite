@@ -17,6 +17,62 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-17 — Fase F: Eventos Betano via `event.incidents[]` (dataset puro)
+
+**Contexto:** Persistir eventos individuais (gols, cartões, escanteios, substituições, etc) capturados do `event.incidents[]` no mesmo payload `/event/<id>/state` já usado pelo `BridgeStatsAdapter` (Fase E.1). Caminho A soft progride — **dataset puro** (PASSO 0 confirmou ZERO consumidores externos de `api_client.get_events`).
+
+**Decisão de escopo:** Opt 1 ("dataset puro") confirmada — único caller de `api_client.get_events` é interno em `get_fixture_result` (post-FT, fallback contar corners). Substituição = nicho, deferida pra Fase F.2 quando dataset Betano comprovar cobertura ≥ AF empíricamente (~1-2 semanas).
+
+**O que foi feito (7 commits, `ef112b7` → `a65bfe6`, ~6h):**
+
+- **PARTE A** — Migration `0006_events_history.sql` (11 colunas + 3 índices + UNIQUE dedup `(fixture_id, source, event_type, event_minute, team_side, player_name)` + CHECK constraint `team_side ∈ {home, away, NULL}`). `EventsHistoryRepo` com 4 métodos (`upsert_event`, `upsert_batch`, `get_recent_by_fixture`, `get_by_type_in_window`).
+- **PARTE B** — `CanonicalEvent` frozen dataclass + `EventsProvider` Protocol + `CompositeEventsProvider` (cascata sequencial Betano→AF, `[]` = sucesso sem fallback). `BridgeEventsAdapter` reusa endpoint `/event/<id>/state` do bridge — parse `event.incidents[]` com normalização de `teamSide` (0→home/1→away/outro→None), parse de `time="50'+3'"`, drop de incidents sem minute. `APIFootballEventsAdapter` refactor do `get_events` legado com mapping `(af_type, af_detail)` → canônico (GOAL/YELL/RCRD/SUBS/VAR/PENL/CGOL). Hint `home_team_id` resolve `team_side` no AF (None graceful quando ausente). `betano_event_id` opcional no Protocol pra pular lookup no `fixture_repo` quando caller já sabe.
+- **PARTE C** — `BetanoEventsWorker.capture(fixture_id, *, betano_event_id, home_team_id)` stateless. Configs `USE_BETANO_EVENTS=false` default + `EVENTS_POLL_INTERVAL_SEC=30`. Factory helper `build_events_provider` monta o Composite. Wiring `main.py::_capturar_events` fire-and-forget após telemetria odds, throttle 30s por fixture, defensivo `home_team_id` resolution. **Sem consumer substitution** (Opt 1).
+- **PARTE D** — 35 testes verdes (alvo 22+): repo (6), bridge adapter (9), AF adapter (8), composite (7), worker (5). Críticos cobertos: dedup, `[]` não cai fallback, `team_side=None` graceful, provider `None/[]` zero-zero, AF unmapped warning + fallback, hints repassados.
+
+**Ajustes pós-review aplicados:**
+- (AJUSTE 1) AF mapping ganhou CGOL (`Goal/Cancelled Goal`, `Var/Goal cancelled`) + VAR (`Penalty awarded/confirmed`) + log WARNING quando type+detail cai em fallback.
+- (AJUSTE 2) `betano_event_id` no Protocol; AF aceita `home_team_id` (Opção A — sem chamada extra; AF sem créditos).
+- (AJUSTE 3) Composite log INFO quando primary devolve `[]` (analytics futuro).
+- (AJUSTE 4) Cache compartilhado payload bridge entre stats+events workers deferido pra Fase I (ROADMAP atualizado).
+- (POST-REVIEW PARTE C) Defensivo `try/except (KeyError, TypeError, AttributeError)` em `_capturar_events::home_team_id` (fixture mal-formado não crasha worker).
+- (POST-REVIEW PARTE C) Docstring trade-off throttle 30s — defasagem aceitável pra dataset histórico (H2-H4); insuficiente pra reação real-time.
+
+**Bugs encontrados:**
+- AF `Goal/Cancelled Goal` antes ia pra fallback genérico (`UPPERCASE`). Agora vira `CGOL` explicitamente.
+- Política heurística "só >0 sobrescreve" no mapper E.1 reaplicada como template — substituída por `BETANO_GAPS` frozenset durante refactor (zero re-aplica esse erro).
+
+**Decisões:** ADR já cobre família CASO α em [DECISIONS.md](DECISIONS.md). F é refinamento incremental — sem ADR nova.
+
+**Smoke real validado:**
+
+- 18 eventos persistidos via 4 rodadas de captura em 2 fixtures (Palmeiras × Cruzeiro min 50, Cuiabá × Novorizontino min 76).
+- Mix de types: GOAL/YELL/SUBS (cobertura realista).
+- Source: **100% `apifootball` durante a janela do smoke** — bridge_events retornou 503 em todas as 4 tentativas (renewer warmup, mesmo pattern intermitente da Fase E.1).
+- Dedup confirmado: round 3 inseriu 0 / pulou 6 (jogo sem mudança); round 4 inseriu 2 / pulou 9 (jogo evoluiu, 2 events novos).
+- Throttle 30s observado: capturas mesmo fixture com ≥2min de espaço.
+- Decision_engine intocado: análises normais (`[ANALISE] Palmeiras vs Cruzeiro | Min 50 | Placar 1-1`).
+- Rollback test natural: Composite cascade comprovado — bridge 503 → AF assume → 18 events persistidos.
+
+**Smoke source=bridge_betano**: aguardando próxima janela de jogos (main em sleep 2h pós-FT dos 2 fixtures). Mesma dinâmica E.1 — source flippa automaticamente quando renewer recuperar.
+
+**Achados operacionais:**
+- Background poll inicial expirou em janela de jogos curta (45min) sem capturar source=bridge_betano. Aceitável — fallback AF cobriu o gap.
+- `docker compose up -d --force-recreate` ≠ rebuild de imagem. Configs novas precisam `--build`. Padrão E.1 não tinha esse problema porque eu rebuildei explícito.
+- Dedup constraint funciona perfeitamente — round 3 mostrou skipped_dup=6 com total=6 (jogo estático).
+
+**Estado final:**
+- ✅ `USE_BETANO_EVENTS=true` ativo em produção
+- ✅ `events_history` populando (18 events na sessão)
+- ✅ Composite cascade Betano→AF funcional
+- ✅ Decision_engine sem regressão
+- ✅ 35/35 testes verdes, 7 commits push pra `feat/betano-bridge-adapter`
+- ⏳ Fase F.2 (substituição `api_client.get_events` interno) deferida pra ~1-2 semanas após validar cobertura
+
+**Próximos passos:** Fase G (lineups via `/api/statsstream/<id>/info/aggregated/`).
+
+---
+
 ## 2026-05-17 — Fase E.1: Stats Betano via `/danae-webapi` (CASO α)
 
 **Contexto:** Substituir `api_client.get_statistics` (API-Football) por pipeline canônico de stats consumindo `bridge:8080/event/<id>/state`. Caminho A soft progride — stats runtime agora **Betano-primário com fallback AF** automático via Composite cascade.

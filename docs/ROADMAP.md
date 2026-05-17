@@ -20,6 +20,7 @@ Fases planejadas + estado atual. Atualizado quando fase fecha ou nova é planeja
 - **Systemd units** — Bridge resilient a crash + reboot
 - **Fase E.0** — Investigação técnica stats Betano (mapeamento `/danae-webapi/api/live/events/<id>/latest`, gotchas `X-Operator/X-Language`) — commit `5553934` 2026-05-16
 - **Fase E.1** — Stats Betano via bridge + Composite cascade Betano→AF. `USE_BETANO_STATS=true` em produção, smoke real validado (6 capturas bridge_betano + 12 AF fallback, version polling 4133→4222, latência 7-7.5s, decision_engine consumindo Score=7) — commit `1e3efca` 2026-05-17
+- **Fase F** — Eventos Betano via `event.incidents[]` (dataset puro). `BetanoEventsWorker` persiste em `events_history` paralelo ao pipeline live. CompositeEventsProvider Betano→AF. Smoke real validou 18 events via fallback AF (bridge renewer em warmup intermitente, source bridge_betano flippa quando recupera — mesma dinâmica E.1). Dedup UNIQUE comprovado, throttle 30s, decision_engine intocado. `USE_BETANO_EVENTS=true` ativo — commit `a65bfe6` 2026-05-17
 
 ## Em progresso
 
@@ -32,11 +33,10 @@ Fases planejadas + estado atual. Atualizado quando fase fecha ou nova é planeja
 - Substitui polling 15s por push real-time
 - **Não bloqueia caminho A** — só se polling ficar lento pra decisões críticas
 
-### Fase F — Eventos Betano (~8-12h)
-- `event.incidents[]` da Betano (GOAL/YELL/CRNR/RCRD/OFFS/SUBS/PENL/StoppageTime)
-- Substituir `api_client.get_events()`
-- Persistir `events_history` (timing exato de gols/cartões)
-- Habilita análise pós-jogo + reconstrução de janelas via timeline (vs estimativa atual via rate)
+### Fase F.2 — Substituição `api_client.get_events` interno (~1-2h)
+- Único caller (`api_client.get_fixture_result`, post-FT corner fallback) ainda usa AF.
+- Substituir por `EventsHistoryRepo.get_by_type_in_window(fixture, 'CRNR')` quando dataset Betano comprovar cobertura ≥ AF empíricamente (~1-2 semanas de capturas).
+- Sem urgência — post-FT é cold path, AF cota baixa.
 
 ### Fase G — Lineups Betano (~6-10h)
 - Investigar endpoint (provável: `/api/statsstream/<id>/info/aggregated/`)
@@ -44,7 +44,7 @@ Fases planejadas + estado atual. Atualizado quando fase fecha ou nova é planeja
 - Persistir `lineups_history`
 
 ### Fase H — Refactor remover `api_client.*` de runtime (~4-6h)
-- Quando E.1 + F + G prontos, AF vira só residual (discovery + resultado FT)
+- Quando E.1 + F + F.2 + G prontos, AF vira só residual (discovery + resultado FT)
 
 ### Fase I — Otimização + cache + testes integração (~8-15h)
 
