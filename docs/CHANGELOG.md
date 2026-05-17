@@ -17,6 +17,56 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-17 — Fase E.1: Stats Betano via `/danae-webapi` (CASO α)
+
+**Contexto:** Substituir `api_client.get_statistics` (API-Football) por pipeline canônico de stats consumindo `bridge:8080/event/<id>/state`. Caminho A soft progride — stats runtime agora **Betano-primário com fallback AF** automático via Composite cascade.
+
+**O que foi feito (9 commits, 66ec557 → 1e3efca, ~10h):**
+
+- **PARTE C'** — `BridgeStatsAdapter` (`data/providers/betano/bridge_stats_adapter.py`, 268 LoC). Implementa `StatsProvider` Protocol consumindo bridge `/event/<id>/state`. Cache de `version` por fixture pra mandar `if_version=N` no próximo poll. Normaliza `event.liveData.results` em `CanonicalStats`. Robusto contra cobertura ausente por liga. `CanonicalStats` estendido com 6 campos opcionais (`version`, `second_since_start`, `corners_last_5/10min`, `yellow_last_5/10min`, `captured_at_ts`, `is_cached`) — compat 100% com Fase A. Deletado `betano/stats_adapter.py` (Opta REST orfão, bloqueado por 403 CF). Foot-gun WARNING em factory se `USE_NEW_PROVIDERS=true` sem `(USE_BETANO_BRIDGE + USE_BETANO_STATS)`.
+- **PARTE D** — Migration `0005_stats_history.sql` idempotente (29 colunas + 3 índices, UNIQUE parcial `(fixture_id, source, version) WHERE version IS NOT NULL`). `StatsHistoryRepo` com `insert/list_recent_for_fixture/latest_version_for_fixture`.
+- **PARTE E'** — `StatsWindowCalculator` (`data/services/`, deque maxlen=120 por fixture, edge cases: empty/decreased/maxlen_eviction/concurrent). `BetanoStatsWorker` (`workers/`) com `poll(fixture)`: bootstrap → adapter → calculator → insert. Tratamento `is_cached=True` (NÃO duplica no deque, `freshness='cached'`). Configs `USE_BETANO_STATS`, `STATS_POLL_INTERVAL_SEC=15`, `STATS_WINDOW_HISTORY_SIZE=120`, `STATS_BOOTSTRAP_LOOKBACK_MIN=20`.
+- **PARTE F'** — Factory 4º caminho (`USE_BETANO_BRIDGE + USE_BETANO_STATS → CompositeStatsProvider([bridge, AF])`). Mapper `canonical_to_jogo` em `data/services/canonical_to_jogo.py` com política **BETANO_GAPS frozenset explícita** (9 campos onde Betano não cobre — `cartoes_vermelhos_*`, `posse_ultimos_10min`, `faltas_*`, `ataques_perigosos_ultimos_10min`, `finalizacoes_recentes`). Wiring em `main.py:_analisar_jogo` substitui `api_client.get_statistics` por `self.stats_worker.poll(fixture)` quando flag ativo.
+- **PARTE G** — 28 testes novos (`tests/services/`, `tests/workers/`, `tests/providers/betano/test_bridge_stats_adapter.py`, `tests/test_stats_history_repo.py`). Suite final: **65/65 verdes** (37 baseline + 28 novos).
+- **WIP cleanup** — aplicado `helpers.enrich_jogo_with_cards` + `notification_manager.cards_group_id/database` do stash (nunca commitados; main.py importava). Dropados 2 stashes obsoletos. Removida duplicação `_build_canonical_fixture` (module-level vs class method). Assert defensivo `placar_casa/fora not None` no helper de classe.
+
+**Bugs encontrados:**
+
+- Política heurística "só sobrescreve se >0" no mapper era armadilha (AF zero ≠ Betano gap). Substituída por `BETANO_GAPS` frozenset explícito ([DECISIONS.md](DECISIONS.md#caso-α)).
+- `finalizacoes_recentes` mapeado erroneamente como `shots_on_target` — **gap semântico** Betano `shots` ≠ AF `Shots on Goal`. Movido pra `BETANO_GAPS`.
+- Cache 304 do bridge é **dead-code em produção** — bridge TTL=3s << worker poll=15s, cache HIT do bridge nunca trigger. Insight pra futura otimização.
+- WIP não commitado descoberto durante smoke pré-PARTE H (auditoria PEDIDA pelo Daniel) — `enrich_jogo_with_cards` e `NotificationManager(cards_group_id=)` vivendo só em disco; container herdava de build anterior. Caso silencioso de "código em produção mas não rastreado". Corrigido.
+
+**Decisões:** [DECISIONS.md §"CASO α"](DECISIONS.md) já documentada na E.0 (2026-05-16). Refactor BETANO_GAPS pós-review aplicado sem mudar ADR (escopo de implementação).
+
+**Smoke real validado:**
+
+- **6 capturas `bridge_betano` + 12 `apifootball`** em `stats_history` (Composite cascade real).
+- **Version polling funcional**: 1545164 progrediu 4133 → 4195 → 4222.
+- **Janelas temporais calculadas**: 1520683 yellow_last_10min cresceu 1→2.
+- **Decision_engine consumindo dados live**: CardsDecision `Score=7` APROVADO em River Plate ×Rosario Central.
+- **Latência 7-7.5s end-to-end** (target <10s ✓).
+- **Rollback test natural**: bridge falhou nos primeiros 10min (Brave warmup), AF assumiu (12 capturas AF), bridge recuperou (6 capturas bridge_betano). Source flippa sem intervenção.
+
+**Achados operacionais:**
+
+- **Brave pool warmup ~10min** após restart — Composite cai em AF naturalmente durante. Não é bug.
+- **Cache 304 bridge dead-code** em produção (TTL 3s << poll 15s).
+- **`finalizacoes_recentes` gap semântico** shots ≠ Shots on Goal (catch da review).
+- **Duplicação `_build_canonical_fixture`** eliminada (module-level vs class method).
+
+**Estado final:**
+
+- ✅ `USE_BETANO_STATS=true` ativo em produção
+- ✅ `stats_history` populando com source mix (bridge_betano primário, AF fallback)
+- ✅ decision_engine sem regressão
+- ✅ 65/65 testes verdes, 9 commits push pra `feat/betano-bridge-adapter`
+- ⏳ E.2 WebSocket push (futuro, opcional, não bloqueia)
+
+**Próximos passos:** Fase F (eventos via `event.incidents[]`).
+
+---
+
 ## 2026-05-16 (sessão 6) — Fase D.2 PARTE A: catálogo de teams via bridge
 
 **Contexto:** Sessão 5 entregou D.2 com PARTE A pendente. Discovery rodando 100% via fuzzy match (sem catálogo prévio). PARTE A popula `betano_team_map` proativamente pra acelerar lookup determinístico.

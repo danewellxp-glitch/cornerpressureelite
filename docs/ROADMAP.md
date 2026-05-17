@@ -18,24 +18,42 @@ Fases planejadas + estado atual. Atualizado quando fase fecha ou nova é planeja
 - **Fase D.2 PARTE A** — Catálogo de teams 1×/dia: danewell `/danae/teams` (agrega live + upcoming) → bridge `/teams` (cache 24h) → worker refresh popula `betano_team_map` proativamente
 - **Proxy residencial** — Brave do pool sai por IP RJ (ML Telecom) pra diversificar fingerprint
 - **Systemd units** — Bridge resilient a crash + reboot
+- **Fase E.0** — Investigação técnica stats Betano (mapeamento `/danae-webapi/api/live/events/<id>/latest`, gotchas `X-Operator/X-Language`) — commit `5553934` 2026-05-16
+- **Fase E.1** — Stats Betano via bridge + Composite cascade Betano→AF. `USE_BETANO_STATS=true` em produção, smoke real validado (6 capturas bridge_betano + 12 AF fallback, version polling 4133→4222, latência 7-7.5s, decision_engine consumindo Score=7) — commit `1e3efca` 2026-05-17
 
 ## Em progresso
 
 - **Smoke real D.0 + D.2** — Validar telemetria + matches em jogo de liga monitorada ao vivo (pendente overlap real)
 
-## Próximas fases (Caminho A — eliminar API-Football)
+## Próximas fases (Caminho A soft restante)
 
-### Fase E — Adapter Stats (~10-14h)
-- /api/statsstream/<id>/stats/detailed
-- StatsProvider no Composite
+### Fase E.2 — WebSocket push stats (opcional, ~6-10h)
+- `wss://www.betano.bet.br/sbpitches/statsstream/matchhub` (SignalR)
+- Substitui polling 15s por push real-time
+- **Não bloqueia caminho A** — só se polling ficar lento pra decisões críticas
 
-### Fase F — Adapter Eventos (~8-12h)
-### Fase G — Adapter Lineups (~6-10h)
-### Fase H — Remover api_client de main.py (~6-10h)
-### Fase I — Testes + rate limit + RAM management (~10-20h)
+### Fase F — Eventos Betano (~8-12h)
+- `event.incidents[]` da Betano (GOAL/YELL/CRNR/RCRD/OFFS/SUBS/PENL/StoppageTime)
+- Substituir `api_client.get_events()`
+- Persistir `events_history` (timing exato de gols/cartões)
+- Habilita análise pós-jogo + reconstrução de janelas via timeline (vs estimativa atual via rate)
+
+### Fase G — Lineups Betano (~6-10h)
+- Investigar endpoint (provável: `/api/statsstream/<id>/info/aggregated/`)
+- Substituir `api_client.get_lineups()`
+- Persistir `lineups_history`
+
+### Fase H — Refactor remover `api_client.*` de runtime (~4-6h)
+- Quando E.1 + F + G prontos, AF vira só residual (discovery + resultado FT)
+
+### Fase I — Otimização + cache + testes integração (~8-15h)
+
+**Total Caminho A soft restante:** ~30-50h em 5-8 sessões.
+
+## Fases Caminho A hard (eliminar AF completamente)
+
 ### Fase J — Descontinuar API-Football (~2h)
-
-**Total Caminho A restante:** ~55-95h em 6-10 semanas.
+Quando F+G+H entregues e estáveis, remove `APIFootballClient` do orquestrador.
 
 ## Fases Quant (longo prazo)
 

@@ -201,3 +201,105 @@ docker compose up -d --force-recreate api main
 `python3 -m pytest corner-pressure-elite/tests/` funciona porque toda
 dependência do CPES já está instalada globalmente no odin (`python3 -c
 "import asyncpg, fastapi" → ok`).
+
+## Fase E.1 — Stats Betano operacional
+
+Pipeline canônico de stats agora consome `bridge:8080/event/<id>/state` (Betano /danae-webapi) com fallback automático API-Football via Composite cascade. Ativado em produção 2026-05-17.
+
+### Toggle `USE_BETANO_STATS`
+
+Ativar (default produção desde 2026-05-17):
+```bash
+grep -q "^USE_BETANO_STATS" corner-pressure-elite/.env || \
+  echo 'USE_BETANO_STATS=true' >> corner-pressure-elite/.env
+docker compose up -d --force-recreate main
+```
+
+Reverter pra AF puro (modo degradado, debug):
+```bash
+sed -i '/^USE_BETANO_STATS/d' corner-pressure-elite/.env
+docker compose up -d --force-recreate main
+```
+
+Confirmar wiring ativo:
+```bash
+docker logs cpes-main 2>&1 | grep -E "BetanoStatsWorker|bridge_stats enabled" | head -3
+# Esperado: 3 linhas (factory + bridge_stack + Worker ativo)
+```
+
+### Monitoramento
+
+Capturas por source na última hora (saudável: `bridge_betano > apifootball` 5-10×):
+```bash
+docker exec cpes-postgres psql -U cpes_user -d cpes -c \
+  "SELECT source, COUNT(*) FROM stats_history
+   WHERE captured_at > NOW() - INTERVAL '1 hour'
+   GROUP BY source;"
+```
+
+Alerta: `apifootball >> bridge_betano` em janela longa → bridge degradado ou Brave precisa de warmup.
+
+Latência do bridge nos últimos polls:
+```bash
+tail -200 ~/cpes-bridge/bridge.log | grep "event_state" | tail -10
+# elapsed=7-10s normal; >15s consistente = degradação
+```
+
+### Warmup do Brave pool
+
+Após restart do `danewell-renewer` ou Brave, aguardar **~10min** antes de validar bridge_betano. Durante warmup, Composite cai em AF naturalmente (não é bug — Brave precisa aquecer cookies CF + sessão).
+
+Sinais de warmup em andamento:
+```bash
+docker logs cpes-main 2>&1 | grep "bridge_stats.http_error" | tail -10
+# Status 502/503 consistente em primeiros ciclos = warmup
+```
+
+Confirmar primário operacional:
+```bash
+tail -50 ~/cpes-bridge/bridge.log | grep "event_state.*status=200" | tail -5
+# Mix 200 OK = bridge ok
+```
+
+### Renewer 502 troubleshooting (`/danae/event/<id>/state`)
+
+**Sintoma:** body do 502 contém `"fetch falhou no Chrome: TypeError: Failed to fetch"`.
+
+**Diagnóstico em ordem:**
+
+1. `/health` do renewer responde?
+   ```bash
+   curl -s http://192.168.1.5:8081/health | jq
+   ```
+2. `/danae/live` (D.1) também afetado? (Se sim, escopo > E.1)
+   ```bash
+   curl -s -w "\nHTTP %{http_code}\n" "http://192.168.1.5:8081/danae/live?sport=FOOT" | tail -3
+   ```
+3. Chrome/Brave responsivos via CDP?
+   ```bash
+   curl -s http://192.168.1.5:9223/json/version | jq .Browser
+   ```
+4. Cookies `_cfuvid` stale? (3+ dias = provável)
+
+**Fixes possíveis (em ordem):**
+1. Aguardar 10min warmup
+2. SSH danewell + `systemctl --user restart danewell-renewer`
+3. Refresh cookies CF (warmup manual via SPA)
+4. Restart Brave (último recurso) + aguardar warmup
+
+### Limites operacionais
+
+| Parâmetro | Default | Notas |
+|---|---|---|
+| `STATS_POLL_INTERVAL_SEC` | 15 | Base do worker. Bridge cache TTL=3s << poll, cache 304 hoje é dead-code (otimização futura). |
+| `STATS_WINDOW_HISTORY_SIZE` | 120 | ~30min em memória @ 15s/poll. Cobre janelas 5/10min com folga. |
+| `STATS_BOOTSTRAP_LOOKBACK_MIN` | 20 | Lookback pra hidratar calculator em restart. |
+| Capacidade segura | **8-10 jogos simultâneos** | Sem ajuste. Acima: aumentar poll_interval pra 20-30s OU adicionar Chrome ao pool. |
+
+### Stats history — schema rápido
+
+`stats_history` (migration `0005_stats_history.sql`) tem 29 colunas:
+- canonical: `fixture_id`, `source`, `minute`, `score_*`, `corners_*`, `yellow_cards_*`, `red_cards_*` etc.
+- Fase E.1: `version` (snapshot Betano), `second_since_start` (clock granular), `corners_last_5/10min`, `yellow_last_5/10min` (janelas calculadas pelo `StatsWindowCalculator`)
+- `raw->>'freshness'` ∈ `{'fresh', 'cached'}` pra auditoria de cache hits
+- UNIQUE parcial `(fixture_id, source, version) WHERE version IS NOT NULL` previne dup de mesma versão Betano (defesa contra race do bridge cache).
