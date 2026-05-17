@@ -445,6 +445,70 @@ export interface SignalDetail {
 export const fetchSignalsList = (result: SignalResult = "all", limit = 100) =>
   apiFetch<SignalDetail[]>(`/signals/list?result=${result}&limit=${limit}`);
 
+// ─── User-scoped: stats + signals com decision (Sprint M) ──────
+
+export interface UserStats {
+  total: number;
+  greens: number;
+  reds: number;
+  pendentes: number;
+  push_void: number;
+  winrate: number;       // %
+  staked_cents: number;
+  pnl_cents: number;
+  roi_pct: number;       // %
+  roi_total: number;     // reais (retro-compat)
+  avg_odd: number;
+  aguardando_decisao: number;
+}
+
+export type UserDecisionState = "pending" | "entered" | "skipped";
+
+export interface UserSignalDecision {
+  decision: UserDecisionState;
+  odd_entrada: number | null;
+  valor_apostado_cents: number | null;
+  resultado: "GREEN" | "RED" | "PUSH" | "VOID" | null;
+  payout_cents: number | null;
+  decided_at: string | null;
+}
+
+export interface UserSignalDetail {
+  signal_id: number;
+  timestamp: string | null;
+  jogo_descricao: string | null;
+  tipo_sinal: string | null;
+  pressure_score: number | null;
+  projecao: number | null;
+  edge: number | null;
+  linha: number | null;
+  odd: number | null;
+  signal_resultado: SignalResult | "PENDENTE";
+  escanteios_final: number | null;
+  tipo_analise: "ESCANTEIOS" | "CARTOES" | string;
+  matching_tiers: string[];
+  minuto: number | null;
+  placar: string | null;
+  decision: UserSignalDecision;
+}
+
+export const fetchUserStats = () => apiFetch<UserStats>("/users/me/stats");
+
+export const fetchUserSignals = (limit = 100) =>
+  apiFetch<UserSignalDetail[]>(`/users/me/signals?limit=${limit}`);
+
+export const decideSignal = (
+  signalId: number,
+  body:
+    | { decision: "entered"; odd_entrada: number; valor_apostado_cents: number }
+    | { decision: "skipped" },
+) =>
+  apiFetch<UserSignalDecision & { id: number }>(`/signals/${signalId}/decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
 // ─── WhatsApp WAHA health (admin-only) ─────────────────────────
 
 export interface WhatsappHealth {
