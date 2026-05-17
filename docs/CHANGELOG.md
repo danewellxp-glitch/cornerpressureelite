@@ -17,6 +17,47 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-17 — PRIORIDADE 1: cutover odds → `/event/<id>/state` (Bug 1 user resolvido)
+
+**Contexto:** Bug 1 (user): 100% das odds últimas 24h vinham via `apifootball` (1145 entradas). Bridge `/markets` retornava `text_len=0` consistentemente — anti-bot Cloudflare nukeou a rota legada `/live/_/<id>/`. CPES vende sinal de Over Escanteios + Cartões Amarelos; sem odds Betano = crise.
+
+**O que foi feito:**
+
+- **PASSO 0–1 — Mapeamento offline:** captura E.0 (Saudi League B) enganou — só 132 markets, zero corners. Daniel forneceu HAR nova (`escanteios.har`, La Liga) com **261 markets** em `/danae-webapi/api/live/events/<id>/latest`: **41 corner markets** (`CNOU`/`COU1`/`COF3`) + **28 card markets** (`TCOU`/`1COU`/`HCOU`/`ACOU`). Conclusão: endpoint canônico **já tem tudo**, basta filtrar por type code. Sem precisar endpoint novo.
+
+- **PASSO 2 — Implementação:**
+  - `data/providers/betano_bridge/state_markets_parser.py` (novo): função pura `extract_lines(payload, market_kind)` que filtra markets por type + extrai `(line, over_price, under_price)`. Dedup por handicap, ordem de selection swap-safe.
+  - `BetanoBridgeClient.event_state()`: novo método consumindo `/event/<id>/state`.
+  - `BetanoBridgeOddsAdapter`: novo param `use_state_endpoint` roteia `_from_catalog` pra `event_state` + parser. Path legado preservado intacto.
+  - `config.USE_NEW_MARKETS_ROUTE` (default `false`): feature flag cutover.
+  - `factory.py`: passa flag pro adapter.
+
+- **PASSO 3 — Tests:** 10 testes parser + zero regressão no adapter (26/26 verde). Sanity contra HAR real: 8 corner lines (0.5→8.5) + 4 card lines (1.5→5.5) extraídos.
+
+- **PASSO 4 — Smoke real em produção:**
+  1. Renewer no danewell estava 502 (`fetch falhou no Chrome: TypeError: Failed to fetch`) — Brave do pool stuck há 40h. **Resolvido via SSH (alias `danewell`): kill + setsid respawn Brave preservando profile**. 3/3 attempts OK em 7s.
+  2. Bridge `/event/state` validado live (Sevilla x Real Madrid: 260 markets, 5 corner lines, 3 card lines).
+  3. Flag ativada + restart cpes-main → 0 capturas bridge_betano. Diagnóstico: container rodava `config.py` velho (não está no volume mount). `docker compose up -d --build main` resolveu.
+  4. **Resultado pós-rebuild (10min smoke):**
+     - `betano_bridge`: **56 captures (77.8%)** — era 0% antes
+     - `apifootball`: 16 captures (22.2%) — residual quando bridge falha
+     - Latência média: **0.087s** (cache hit `/event/state`)
+  5. Decision engine intocado, bloqueios por janela/threshold (esperado).
+
+**Bugs encontrados:**
+
+- Bug D (meu, E.1 PARTE B): `Response(content=None)` com Content-Length gera `RuntimeError` no uvicorn. Fix: `Response(status_code=304)` bare. Commit `12d1017` em bridge.
+- Bug operacional: Brave do pool stuck 40h sem detecção (health endpoint superficial só checa CDP, não `fetch()`). Tratável via restart manual; valeria considerar healthcheck que faz fetch real.
+- Bug arquitetural: `config.py` fora do volume `docker-compose.yml` cpes-main → mudanças em config exigem `--build`, não só `--force-recreate`. Documentar.
+
+**Decisões:**
+- `USE_NEW_MARKETS_ROUTE=true` mantida ligada em produção pós-smoke.
+- Path legado `/markets` preservado no adapter (zero risco de remover por enquanto, pode ajudar diagnóstico futuro).
+
+**Estado final:** PRIORIDADE 1 ✅ closed. Bug 1 user resolvido. K.1 cascata segue OK (USE_SOFASCORE=true). Próximas prioridades pendentes: P2 (popular team_map Premier League), P3 (fix lineups merge bug), P4 (renewer 502 root cause / healthcheck profundo).
+
+---
+
 ## 2026-05-17 — Fase K.0: Investigação SofaScore API (CASO α via curl_cffi)
 
 **Contexto:** Caminho A soft ~75% (D.0→G.1 entregues). Fallback dos 3 Composites E.1/F/G ainda é AF — sem créditos no momento (CLAUDE.md §10). Fase K planeja substituir AF runtime por SofaScore (estável, grátis, dados ricos).
