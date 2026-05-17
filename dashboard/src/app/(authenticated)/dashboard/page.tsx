@@ -94,7 +94,7 @@ export default function DashboardPage() {
         let cancelled = false;
         setLoadingSignals(true);
         setLoadError(null);
-        fetchSignalsList("all", 2000)
+        fetchSignalsList("all", 500)
             .then((list) => {
                 if (cancelled) return;
                 setAllSignals(list);

@@ -21,7 +21,7 @@ export default function AprendaPage() {
 
     useEffect(() => {
         let cancelled = false;
-        fetchSignalsList("all", 2000)
+        fetchSignalsList("all", 500)
             .then((l) => !cancelled && setSignals(l))
             .catch(() => {})
             .finally(() => !cancelled && setLoading(false));

@@ -54,7 +54,7 @@ export default function PerformancePage() {
     useEffect(() => {
         let cancelled = false;
         setLoading(true);
-        fetchSignalsList("all", 2000)
+        fetchSignalsList("all", 500)
             .then((list) => !cancelled && setSignals(list))
             .catch(() => {})
             .finally(() => !cancelled && setLoading(false));
