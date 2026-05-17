@@ -1,8 +1,11 @@
 """Mapping CPES (API-Football) league_id → SofaScore tournament/season IDs.
 
 `unique_tournament_id` é estável (Brasileirão A = 325 sempre). `season_id`
-muda a cada temporada — quando faltar (`None`), K.1 deve buscar via
-`/unique-tournament/{id}/seasons` no startup ou cachear no DB.
+muda a cada temporada — atualizar 1x por temporada rodando
+`scripts/discover_sofascore_seasons.py` e copiando os valores aqui
+(intencionalmente manual pra evitar drift silencioso).
+
+Última atualização: 2026-05-17 via discover script.
 """
 from __future__ import annotations
 
@@ -19,55 +22,55 @@ SOFASCORE_LEAGUE_MAP: dict[int, dict] = {
     },
     72: {  # Brasileirão Série B
         "unique_tournament_id": 390,
-        "season_id_current": None,
+        "season_id_current": 89840,
         "name": "Brasileirão Série B",
         "country": "BR",
     },
     73: {  # Copa do Brasil
         "unique_tournament_id": 373,
-        "season_id_current": None,
+        "season_id_current": 89353,
         "name": "Copa do Brasil",
         "country": "BR",
     },
     39: {  # Premier League
         "unique_tournament_id": 17,
-        "season_id_current": None,
+        "season_id_current": 76986,
         "name": "Premier League",
         "country": "EN",
     },
     140: {  # La Liga
         "unique_tournament_id": 8,
-        "season_id_current": None,
+        "season_id_current": 77559,
         "name": "La Liga",
         "country": "ES",
     },
     135: {  # Serie A Italia
         "unique_tournament_id": 23,
-        "season_id_current": None,
+        "season_id_current": 76457,
         "name": "Serie A",
         "country": "IT",
     },
     78: {  # Bundesliga
         "unique_tournament_id": 35,
-        "season_id_current": None,
+        "season_id_current": 77333,
         "name": "Bundesliga",
         "country": "DE",
     },
     88: {  # Eredivisie
         "unique_tournament_id": 37,
-        "season_id_current": None,
+        "season_id_current": 77012,
         "name": "Eredivisie",
         "country": "NL",
     },
     94: {  # Liga Portugal
         "unique_tournament_id": 238,
-        "season_id_current": None,
+        "season_id_current": 77806,
         "name": "Liga Portugal",
         "country": "PT",
     },
     128: {  # Liga Profesional Argentina
         "unique_tournament_id": 155,
-        "season_id_current": None,
+        "season_id_current": 87913,
         "name": "Liga Profesional Argentina",
         "country": "AR",
     },
@@ -80,7 +83,7 @@ SOFASCORE_LEAGUE_MAP: dict[int, dict] = {
     # Champions League (não-monitorada hoje, mas mapeada pra futuro)
     2: {
         "unique_tournament_id": 7,
-        "season_id_current": None,
+        "season_id_current": 76953,
         "name": "UEFA Champions League",
         "country": "EU",
     },
