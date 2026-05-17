@@ -35,13 +35,21 @@ class CanonicalFixture:
 
 @dataclass(frozen=True)
 class CanonicalOverUnder:
-    """Resposta normalizada de qualquer provider para mercados Over/Under."""
-    source: str           # "betano" | "apifootball"
+    """Resposta normalizada de qualquer provider para mercados Over/Under.
+
+    P4-B (2026-05-17): adicionados `is_stale` e `age_seconds` pra cache
+    stale tracking. Caller (decision_engine) BLOQUEIA emit de sinal quando
+    `is_stale=True` mas ainda persiste em `odds_history` pra telemetria.
+    Defaults `False/0` preservam compat com providers que não usam cache.
+    """
+    source: str           # "betano_bridge" | "betano_cache" | "betano_cache_stale" | "apifootball"
     market_kind: str      # "corners" | "cards"
     market_code: str      # "CNOU", "TCOU", "" (vazio para AF)
     linha: float
     odd_over: float
     odd_under: float
+    is_stale: bool = False
+    age_seconds: int = 0
 
 
 @runtime_checkable
