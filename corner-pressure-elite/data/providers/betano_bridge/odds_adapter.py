@@ -36,6 +36,7 @@ from data.providers.betano_bridge.exceptions import (
     BridgeTimeout,
     BridgeUnavailable,
 )
+from data.providers.betano_bridge.state_markets_parser import extract_lines
 
 log = logging.getLogger("cpes.providers.betano_bridge.odds")
 
@@ -53,6 +54,7 @@ class BetanoBridgeOddsAdapter:
         odd_min: float = 1.50,
         odd_max: float = 1.70,
         persistence_worker=None,
+        use_state_endpoint: bool = False,
     ):
         self._client = client
         self._fixture_repo = fixture_repo
@@ -61,6 +63,10 @@ class BetanoBridgeOddsAdapter:
         self._odd_max = float(odd_max)
         self._event_id_cache: dict[int, str] = {}
         self._persistence_worker = persistence_worker
+        # E.1 PARTE B+: quando True, lê markets do /event/<id>/state (JSON
+        # nativo Danae) em vez de /markets (rota legada /live/_/<id>/ nuked
+        # por anti-bot Cloudflare desde 2026-05-17).
+        self._use_state_endpoint = bool(use_state_endpoint)
 
     async def get_corners(
         self, fixture: CanonicalFixture, current_score: int,
@@ -248,7 +254,12 @@ class BetanoBridgeOddsAdapter:
         """
         t0 = time.perf_counter()
         try:
-            catalog = await self._client.markets(event_id, bridge_market)
+            if self._use_state_endpoint:
+                state = await self._client.event_state(event_id)
+                lines = extract_lines(state, market_kind)
+            else:
+                catalog = await self._client.markets(event_id, bridge_market)
+                lines = catalog.get("lines") or []
         except BridgeMarketNotFound as e:
             log.debug(
                 "betano_bridge.catalog_empty event_id=%s market=%s err=%s",
@@ -275,7 +286,6 @@ class BetanoBridgeOddsAdapter:
             return None
 
         elapsed = round(time.perf_counter() - t0, 2)
-        lines = catalog.get("lines") or []
 
         # Telemetria full coverage: persiste o catálogo inteiro antes de
         # degradar pra linha central. Fire-and-forget — falha aqui não

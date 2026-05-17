@@ -230,6 +230,11 @@ WEBSHARE_PROXIES = os.getenv("WEBSHARE_PROXIES", "")
 # expõe REST em :8080. Ver docs/sprints/ pra spec completa do bridge.
 # Default OFF: comportamento idêntico à USE_NEW_PROVIDERS legacy.
 USE_BETANO_BRIDGE = os.getenv("USE_BETANO_BRIDGE", "false").lower() == "true"
+# Fase E.1 PRIORIDADE 1 (2026-05-17): quando True, BetanoBridgeOddsAdapter lê
+# markets via /event/<id>/state (JSON nativo Danae) em vez de /markets (DOM
+# scraping da rota /live/_/<id>/, que foi nuked por anti-bot Cloudflare).
+# Default OFF até smoke validar — feature flag de cutover.
+USE_NEW_MARKETS_ROUTE = os.getenv("USE_NEW_MARKETS_ROUTE", "false").lower() == "true"
 BETANO_BRIDGE_URL = os.getenv("BETANO_BRIDGE_URL", "http://localhost:8080")
 # Pós-otimização Fase 2a.1 o bridge faz ~9-12s/consulta; margem pra timeout total.
 BETANO_BRIDGE_TIMEOUT_SEC = float(os.getenv("BETANO_BRIDGE_TIMEOUT_SEC", "25.0"))

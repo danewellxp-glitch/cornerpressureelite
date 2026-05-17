@@ -202,6 +202,62 @@ class BetanoBridgeClient:
             f"bridge unreachable após {attempts} tentativas event_id={event_id}"
         ) from last_unavailable
 
+    async def event_state(self, event_id: str) -> dict:
+        """Pede o payload /event/<id>/state do bridge (E.1 PARTE B).
+
+        Retorna o JSON `{captured_at, event_id, version, from_cache, data: {...}}`.
+
+        Levanta:
+          - `BridgeUnavailable` se rede falha ou HTTP >= 500
+          - `BridgeTimeout` se o tempo total excede `timeout_sec`
+          - `BridgeMarketNotFound` se HTTP 404 (event não existe)
+        """
+        client = await self._ensure_client()
+
+        attempts = self._retries + 1
+        last_timeout: Optional[Exception] = None
+        last_unavailable: Optional[Exception] = None
+
+        for attempt in range(1, attempts + 1):
+            try:
+                response = await client.get(f"/event/{event_id}/state")
+            except httpx.TimeoutException as e:
+                last_timeout = e
+                log.warning(
+                    "bridge.event_state.timeout attempt=%d/%d event_id=%s",
+                    attempt, attempts, event_id,
+                )
+                continue
+            except httpx.RequestError as e:
+                last_unavailable = e
+                log.warning(
+                    "bridge.event_state.unreachable attempt=%d/%d event_id=%s err=%s",
+                    attempt, attempts, event_id, e,
+                )
+                continue
+
+            if response.status_code == 404:
+                raise BridgeMarketNotFound(f"event_state not_found event_id={event_id}")
+
+            if response.status_code >= 500:
+                last_unavailable = BridgeUnavailable(f"HTTP {response.status_code}")
+                log.warning(
+                    "bridge.event_state.server_error attempt=%d/%d status=%d",
+                    attempt, attempts, response.status_code,
+                )
+                continue
+
+            response.raise_for_status()
+            return response.json()
+
+        if last_timeout is not None:
+            raise BridgeTimeout(
+                f"bridge timeout após {attempts} tentativas event_id={event_id}"
+            ) from last_timeout
+        raise BridgeUnavailable(
+            f"bridge unreachable após {attempts} tentativas event_id={event_id}"
+        ) from last_unavailable
+
     async def health(self) -> dict:
         """Retorna `{status, chrome_connected, pages_open, uptime_seconds}`."""
         client = await self._ensure_client()

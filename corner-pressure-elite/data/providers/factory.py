@@ -88,6 +88,7 @@ async def build_providers(
             odd_min=float(getattr(settings, "BETANO_BRIDGE_PREFERRED_ODD_MIN", 1.50)),
             odd_max=float(getattr(settings, "BETANO_BRIDGE_PREFERRED_ODD_MAX", 1.70)),
             persistence_worker=odds_persistence_worker,
+            use_state_endpoint=bool(getattr(settings, "USE_NEW_MARKETS_ROUTE", False)),
         )
 
         # ----- Stats stack — depende de USE_BETANO_STATS (PARTE F') -----
