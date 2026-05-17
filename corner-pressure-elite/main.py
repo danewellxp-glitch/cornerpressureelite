@@ -46,6 +46,7 @@ from config import (
     USE_BETANO_STATS,
     STATS_WINDOW_HISTORY_SIZE,
     STATS_BOOTSTRAP_LOOKBACK_MIN,
+    USE_BETANO_EVENTS,
     BETANO_EVENT_MAP,
 )
 import config
@@ -69,10 +70,12 @@ from data.repositories.betano_team_map import BetanoTeamMapRepo
 from data.repositories.odds_history import OddsHistoryRepo
 from data.persistence.odds_worker import OddsPersistenceWorker
 from data.discovery.fixture_matcher import FixtureMatcher
+from data.repositories.events_history import EventsHistoryRepo
 from data.repositories.stats_history import StatsHistoryRepo
 from data.services.canonical_to_jogo import canonical_to_jogo, recalc_minute_if_cached
 from data.services.stats_window_calculator import StatsWindowCalculator
 from workers.betano_discovery import BetanoFixtureDiscovery
+from workers.betano_events_worker import BetanoEventsWorker
 from workers.betano_stats_worker import BetanoStatsWorker
 
 logger = logging.getLogger("CPES.Main")
@@ -130,6 +133,14 @@ class CornerPressureElite:
         # quando USE_BETANO_BRIDGE=true AND USE_BETANO_STATS=true. Quando None,
         # _analisar_jogo cai no caminho legado (api_client.get_statistics).
         self.stats_worker: Optional[BetanoStatsWorker] = None
+        # Worker de events Betano via bridge (Fase F — dataset puro). Só
+        # inicia quando USE_BETANO_BRIDGE=true AND USE_BETANO_EVENTS=true.
+        # Decision_engine NÃO consome (PASSO 0 confirmou) — só persiste em
+        # events_history pra Quant H1-H4.
+        self.events_worker: Optional[BetanoEventsWorker] = None
+        self._events_shutdown = None
+        # Throttle por fixture pra capture de events (EVENTS_POLL_INTERVAL_SEC).
+        self._last_events_capture_at: Dict[int, float] = {}
         # Última captura de telemetria por (fixture_id, market) -> timestamp ms.
         self._last_capture_at: Dict[tuple, int] = {}
         self._running = False
@@ -236,6 +247,23 @@ class CornerPressureElite:
                 )
                 logger.info(
                     "BetanoStatsWorker ativo — stats via bridge (Fase E.1 PARTE F')"
+                )
+
+            # Fase F: events Betano via worker (dataset puro pra Quant H1-H4)
+            if USE_BETANO_EVENTS:
+                from data.providers.factory import build_events_provider
+                composite_events, self._events_shutdown = await build_events_provider(
+                    settings=config,
+                    api_client=self.api_client,
+                    fixture_repo=fixture_repo,
+                )
+                events_repo = EventsHistoryRepo(self.database.pool)
+                self.events_worker = BetanoEventsWorker(
+                    provider=composite_events,
+                    repo=events_repo,
+                )
+                logger.info(
+                    "BetanoEventsWorker ativo — events via bridge (Fase F)"
                 )
 
             # Fase D.2: descoberta automática de fixtures Betano via bridge.
@@ -881,6 +909,32 @@ class CornerPressureElite:
                     pass
                 await asyncio.sleep(self.effective_polling_interval)
 
+    async def _capturar_events(self, fixture: Dict, jogo) -> None:
+        """Captura events do fixture via BetanoEventsWorker (Fase F).
+
+        Throttle por fixture via EVENTS_POLL_INTERVAL_SEC. Resolve
+        home_team_id do raw fixture pra repassar ao adapter AF (caso
+        Composite caia em fallback). betano_event_id resolvido via repo
+        do próprio adapter — não passamos hint aqui.
+
+        Fire-and-forget: exceções dentro do worker viram log warning, não
+        re-raise. Dedup natural via UNIQUE constraint absorve dup.
+        """
+        if self.events_worker is None:
+            return
+        last_ts = self._last_events_capture_at.get(jogo.id, 0.0)
+        now_ts = time.time()
+        if (now_ts - last_ts) < config.EVENTS_POLL_INTERVAL_SEC:
+            return
+        teams = fixture.get("teams", {}) or {}
+        home = teams.get("home") if isinstance(teams, dict) else {}
+        home_team_id = home.get("id") if isinstance(home, dict) else None
+        await self.events_worker.capture(
+            jogo.id,
+            home_team_id=home_team_id if isinstance(home_team_id, int) else None,
+        )
+        self._last_events_capture_at[jogo.id] = now_ts
+
     def _build_canonical_fixture(self, jogo) -> CanonicalFixture:
         """Constrói CanonicalFixture a partir do JogoAoVivo legado.
 
@@ -1039,6 +1093,17 @@ class CornerPressureElite:
                 logger.warning(
                     f"Telemetria de odds falhou para {fixture_id}: {e}"
                 )
+
+            # Captura de eventos (Fase F — dataset puro pra Quant H1-H4).
+            # Throttle por fixture via EVENTS_POLL_INTERVAL_SEC. Dedup natural
+            # via UNIQUE constraint do schema 0006 absorve excesso. Fire-and-forget.
+            if self.events_worker is not None:
+                try:
+                    await self._capturar_events(fixture, jogo)
+                except Exception as e:
+                    logger.warning(
+                        f"Captura de events falhou para {fixture_id}: {e}"
+                    )
 
             # ========== ANALISE ESCANTEIOS ==========
             # Pre-avaliacao: filtros + score SEM buscar odds (economia de 1-2 reqs)
