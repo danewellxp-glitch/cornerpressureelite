@@ -888,6 +888,15 @@ class CornerPressureElite:
         é obrigatório no dataclass mas não é consumido — usa `kickoff_at` ou
         agora-UTC como fallback inócuo.
         """
+        # Defesa em runtime: caller (PARTE F' wiring + telemetria odds Fase D.0)
+        # sempre chama parse_fixture_to_jogo ANTES — se ordem mudar, falha rápido
+        # em vez de construir CanonicalFixture com score=0/0 silenciosamente.
+        assert jogo.placar_casa is not None, (
+            "jogo.placar_casa é None — chamar parse_fixture_to_jogo antes"
+        )
+        assert jogo.placar_fora is not None, (
+            "jogo.placar_fora é None — chamar parse_fixture_to_jogo antes"
+        )
         return CanonicalFixture(
             fixture_id=jogo.id,
             home_team=jogo.time_casa,
