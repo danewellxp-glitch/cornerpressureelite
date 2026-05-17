@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, createContext, useContext } from "react";
+import { useState, useEffect, createContext, useContext } from "react";
 import { ThemeProvider, CssBaseline } from "@mui/material";
 import theme from "@/lib/theme";
 import { SideNav } from "./SideNav";
@@ -46,9 +46,20 @@ export function Shell({
     userName,
     isAdmin,
     subscriptionStartedAt,
+    token,
     children,
-}: ShellUser & { children: React.ReactNode }) {
+}: ShellUser & { token: string | null; children: React.ReactNode }) {
     const [open, setOpen] = useState(true);
+
+    // Sincroniza o JWT do cookie (lido server-side no layout) pro localStorage.
+    // useDashboardStream le de localStorage. Fallback pra sessoes que entraram
+    // via cookie antigo sem passar pelo login novo (que ja popula localStorage).
+    useEffect(() => {
+        if (token && typeof window !== "undefined" && !localStorage.getItem("token")) {
+            localStorage.setItem("token", token);
+        }
+    }, [token]);
+
     const stream = useDashboardStream();
 
     return (

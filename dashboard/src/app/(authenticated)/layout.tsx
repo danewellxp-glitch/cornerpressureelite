@@ -46,6 +46,7 @@ export default async function AuthenticatedLayout({
             userName={payload?.user?.full_name || payload?.user?.email || ""}
             isAdmin={isAdmin}
             subscriptionStartedAt={payload?.subscription?.starts_at ?? null}
+            token={token}
         >
             {children}
         </Shell>
