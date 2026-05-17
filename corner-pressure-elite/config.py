@@ -347,3 +347,28 @@ USE_BETANO_LINEUPS = os.getenv("USE_BETANO_LINEUPS", "false").lower() == "true"
 # publicadas pré-jogo / nos primeiros minutos; depois a Betano pode rotacionar
 # o snapshot e perder o roster inicial. 5min é colchão seguro.
 LINEUPS_MAX_MINUTE = int(os.getenv("LINEUPS_MAX_MINUTE", "5"))
+
+
+# ============================================================
+# SofaScore — fallback dos Composites + dataset extra (Fase K.1)
+# ============================================================
+# SofaScore via curl_cffi (impersonate Chrome — bypass TLS fingerprint).
+# K.0 validou CASO α puro: zero bridge, zero proxy. Investigação completa
+# em `docs/architecture/sofascore-api.md`.
+#
+# Política Composite pós-K.1:
+#   Stats/Events: Betano primary → SofaScore fallback → AF super-residual
+#   Lineups:      Betano primary; SofaScore enriquece `coach_name` quando
+#                 Betano retorna None (chamada paralela barata) +
+#                 `missing_players` (lesões/suspensões, novo no schema).
+USE_SOFASCORE = os.getenv("USE_SOFASCORE", "false").lower() == "true"
+SOFASCORE_RATE_LIMIT_PER_SEC = int(os.getenv("SOFASCORE_RATE_LIMIT_PER_SEC", "10"))
+SOFASCORE_TIMEOUT_SEC = float(os.getenv("SOFASCORE_TIMEOUT_SEC", "15"))
+SOFASCORE_IMPERSONATE = os.getenv("SOFASCORE_IMPERSONATE", "chrome120")
+
+# AF super-residual (após SofaScore estabilizar — manter 1-2 semanas pra
+# regredir rápido se SofaScore degradar). Cascade pós-K.1:
+#   Betano → SofaScore → AF (super-residual)
+# Setar 0 quando confiança no SofaScore alta. Discovery + cross-check FT
+# continuam usando AF independente desta flag (cold path).
+AF_SUPER_RESIDUAL_ENABLED = os.getenv("AF_SUPER_RESIDUAL_ENABLED", "true").lower() == "true"
