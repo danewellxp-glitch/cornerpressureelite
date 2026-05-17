@@ -47,6 +47,8 @@ from config import (
     STATS_WINDOW_HISTORY_SIZE,
     STATS_BOOTSTRAP_LOOKBACK_MIN,
     USE_BETANO_EVENTS,
+    USE_BETANO_LINEUPS,
+    LINEUPS_MAX_MINUTE,
     BETANO_EVENT_MAP,
 )
 import config
@@ -71,11 +73,13 @@ from data.repositories.odds_history import OddsHistoryRepo
 from data.persistence.odds_worker import OddsPersistenceWorker
 from data.discovery.fixture_matcher import FixtureMatcher
 from data.repositories.events_history import EventsHistoryRepo
+from data.repositories.lineups_history import LineupsHistoryRepo
 from data.repositories.stats_history import StatsHistoryRepo
 from data.services.canonical_to_jogo import canonical_to_jogo, recalc_minute_if_cached
 from data.services.stats_window_calculator import StatsWindowCalculator
 from workers.betano_discovery import BetanoFixtureDiscovery
 from workers.betano_events_worker import BetanoEventsWorker
+from workers.betano_lineups_worker import BetanoLineupsWorker
 from workers.betano_stats_worker import BetanoStatsWorker
 
 logger = logging.getLogger("CPES.Main")
@@ -141,6 +145,12 @@ class CornerPressureElite:
         self._events_shutdown = None
         # Throttle por fixture pra capture de events (EVENTS_POLL_INTERVAL_SEC).
         self._last_events_capture_at: Dict[int, float] = {}
+        # Worker de lineups Betano via bridge (Fase G.1 — dataset puro). Só
+        # inicia quando USE_BETANO_BRIDGE=true AND USE_BETANO_LINEUPS=true.
+        # Decision_engine NÃO consome — só persiste em lineups_history pra
+        # Quant H2-H4 (formation, qualidade XI, profundidade bench).
+        self.lineups_worker: Optional[BetanoLineupsWorker] = None
+        self._lineups_shutdown = None
         # Última captura de telemetria por (fixture_id, market) -> timestamp ms.
         self._last_capture_at: Dict[tuple, int] = {}
         self._running = False
@@ -264,6 +274,25 @@ class CornerPressureElite:
                 )
                 logger.info(
                     "BetanoEventsWorker ativo — events via bridge (Fase F)"
+                )
+
+            # Fase G.1: lineups Betano via worker (dataset puro pra Quant H2-H4)
+            if USE_BETANO_LINEUPS:
+                from data.providers.factory import build_lineups_provider
+                composite_lineups, self._lineups_shutdown = await build_lineups_provider(
+                    settings=config,
+                    api_client=self.api_client,
+                    fixture_repo=fixture_repo,
+                )
+                lineups_repo = LineupsHistoryRepo(self.database.pool)
+                self.lineups_worker = BetanoLineupsWorker(
+                    provider=composite_lineups,
+                    repo=lineups_repo,
+                    max_minute=LINEUPS_MAX_MINUTE,
+                )
+                logger.info(
+                    "BetanoLineupsWorker ativo — lineups via bridge (Fase G.1) max_minute=%d",
+                    LINEUPS_MAX_MINUTE,
                 )
 
             # Fase D.2: descoberta automática de fixtures Betano via bridge.
@@ -949,6 +978,33 @@ class CornerPressureElite:
         await self.events_worker.capture(jogo.id, home_team_id=home_team_id)
         self._last_events_capture_at[jogo.id] = now_ts
 
+    async def _capturar_lineups(self, fixture: Dict, jogo) -> None:
+        """Captura lineup do fixture via BetanoLineupsWorker (Fase G.1).
+
+        Lineup é estável pós-confirmação: worker faz a captura no primeiro
+        tick com `minute <= LINEUPS_MAX_MINUTE` e marca o fixture como
+        capturado (cache in-memory + repo). Demais polls são no-op rápido.
+        Fire-and-forget: exceções viram log warning, dedup natural via UNIQUE.
+        """
+        if self.lineups_worker is None:
+            return
+        try:
+            home_team_id_raw = fixture["teams"]["home"]["id"]
+            home_team_id = (
+                home_team_id_raw if isinstance(home_team_id_raw, int) else None
+            )
+        except (KeyError, TypeError, AttributeError):
+            home_team_id = None
+            logger.debug(
+                "lineups.home_team_id_unresolved fixture_id=%s",
+                (fixture.get("fixture") or {}).get("id", "?"),
+            )
+        await self.lineups_worker.capture_if_needed(
+            jogo.id,
+            minute=jogo.minuto,
+            home_team_id=home_team_id,
+        )
+
     def _build_canonical_fixture(self, jogo) -> CanonicalFixture:
         """Constrói CanonicalFixture a partir do JogoAoVivo legado.
 
@@ -1117,6 +1173,17 @@ class CornerPressureElite:
                 except Exception as e:
                     logger.warning(
                         f"Captura de events falhou para {fixture_id}: {e}"
+                    )
+
+            # Captura de lineups (Fase G.1 — dataset puro pra Quant H2-H4).
+            # Worker faz o gating (minute<=LINEUPS_MAX_MINUTE + cache + repo).
+            # Fire-and-forget — falha vira log warning, não bloqueia pipeline.
+            if self.lineups_worker is not None:
+                try:
+                    await self._capturar_lineups(fixture, jogo)
+                except Exception as e:
+                    logger.warning(
+                        f"Captura de lineups falhou para {fixture_id}: {e}"
                     )
 
             # ========== ANALISE ESCANTEIOS ==========
@@ -1737,6 +1804,10 @@ class CornerPressureElite:
         await self.api_client.close()
         if self._providers_shutdown is not None:
             await self._providers_shutdown()
+        if self._events_shutdown is not None:
+            await self._events_shutdown()
+        if self._lineups_shutdown is not None:
+            await self._lineups_shutdown()
         if self.odds_persistence_worker is not None:
             await self.odds_persistence_worker.stop()
             logger.info("OddsPersistenceWorker parado")

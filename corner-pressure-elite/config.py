@@ -328,3 +328,18 @@ USE_BETANO_EVENTS = os.getenv("USE_BETANO_EVENTS", "false").lower() == "true"
 # etc), polling acima de stats (15s) é desnecessário; dedup do schema absorve
 # excesso de qualquer modo.
 EVENTS_POLL_INTERVAL_SEC = int(os.getenv("EVENTS_POLL_INTERVAL_SEC", "30"))
+
+
+# ============================================================
+# Lineups Betano via bridge (Fase G.1 — dataset puro)
+# ============================================================
+# BetanoLineupsWorker captura event.roster (formation + startXI + bench +
+# squad) do mesmo endpoint /event/<id>/state da E.1 + F. G.0 confirmou
+# CASO α puro (zero nova request HTTP).
+# Escopo "dataset puro": persiste em lineups_history, decision_engine
+# NÃO consome. Alimenta Quant H2-H4 (formation, qualidade XI, profundidade bench).
+USE_BETANO_LINEUPS = os.getenv("USE_BETANO_LINEUPS", "false").lower() == "true"
+# Janela máxima (em minutos do jogo) pra tentar capturar lineup. Lineups são
+# publicadas pré-jogo / nos primeiros minutos; depois a Betano pode rotacionar
+# o snapshot e perder o roster inicial. 5min é colchão seguro.
+LINEUPS_MAX_MINUTE = int(os.getenv("LINEUPS_MAX_MINUTE", "5"))

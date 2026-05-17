@@ -250,3 +250,39 @@ async def build_events_provider(
         bridge_url,
     )
     return composite, shutdown
+
+
+async def build_lineups_provider(
+    settings: Any,
+    api_client: Any,
+    *,
+    fixture_repo: Any = None,
+) -> Tuple["CompositeLineupsProvider", ShutdownFn]:
+    """Constrói `CompositeLineupsProvider` (Betano bridge primary + AF fallback).
+
+    Pré-condição: caller já checou `USE_BETANO_BRIDGE and USE_BETANO_LINEUPS`.
+    Mesmo padrão de `build_events_provider`.
+    """
+    from data.lineups_provider import CompositeLineupsProvider
+    from data.providers.betano.bridge_lineups_adapter import BridgeLineupsAdapter
+    from data.providers.apifootball.lineups_adapter import APIFootballLineupsAdapter
+
+    bridge_url = getattr(settings, "BETANO_BRIDGE_URL", "http://localhost:8080")
+    timeout = float(getattr(settings, "BETANO_BRIDGE_TIMEOUT_SEC", 25.0))
+
+    bridge_lineups = BridgeLineupsAdapter(
+        bridge_url=bridge_url,
+        fixture_repo=fixture_repo,
+        timeout_seconds=timeout,
+    )
+    af_lineups = APIFootballLineupsAdapter(api_client)
+    composite = CompositeLineupsProvider([bridge_lineups, af_lineups])
+
+    async def shutdown() -> None:
+        await bridge_lineups.close()
+
+    log.info(
+        "providers.lineups_stack primary=bridge_betano fallback=apifootball bridge_url=%s",
+        bridge_url,
+    )
+    return composite, shutdown
