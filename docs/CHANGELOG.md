@@ -17,6 +17,29 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-17 — PRIORIDADE 5: refetch just-before-send + telemetria + timestamp (fidelidade sinal)
+
+**Contexto:** Investigação do sinal #127 (Osasuna vs Espanyol, 15:47:22, linha 9.5 odd 1.42) confirmou que linha+odd ESTAVAM corretas no momento da captura, mas a janela captura→DB→WAHA→user_abrir_betano (5-65s) deixa odd defasada. 30s depois odd já era 1.67; 4min depois linha 9.5 sumiu (10º corner saiu).
+
+**Opção B aprovada pelo user**: refetch composite_odds antes do send_signal, aborta se mudança brusca.
+
+**O que foi feito (2 commits):**
+
+- `0cce1a4` — `engine/odds_refetch.py` com `refetch_validate_corners/cards`. 5 condições de ABORT (filosofia D4 silêncio>erro): `refetch_none` (bridge falhou + cache vazio), `refetch_stale` (cache TTL excedido), `line_changed` (mercado fechou aquela linha), `odd_drift > 15%` (mercado movimentou), `refetch_exception`. Se drift dentro da tolerância, atualiza `jogo.odd_atual` com odd fresh. Configs `ODDS_REFETCH_BEFORE_EMIT` (default true — fail-safe) + `ODDS_REFETCH_MAX_DRIFT_PCT` (0.15). Aplicado em main.py:1380 (corners) e 1447 (cards). 10 tests novos.
+- `58e44b1` — `migrations/0010_blocked_signals.sql` (tabela telemetria com fixture, market, linha, reason, orig_odd, fresh_odd, drift_pct, metadata jsonb). `BlockedSignalsRepo.insert` swallow-on-error (telemetria não pode quebrar pipeline). Refetch ganha kwarg `blocked_repo`. main.py instancia + injeta. `message_formatter.py` adiciona `⏱️ *Odd capturada:* HH:MM:SS (snapshot — odd pode variar segundo-a-segundo)` no bloco MERCADO (Opção C complementar).
+
+**Latência adicional:** ~0ms quando bridge cache 3s ainda válido (cache hit); ~5-8s quando cache miss (chamada bridge nova). Cache hit é o caso normal pq cycle entre captura inicial e refetch é < 3s tipicamente.
+
+**Smoke:** 57/57 tests verde. Migration 0010 aplicada via `_apply_sql_migrations`. Mensagem WhatsApp renderiza timestamp explícito. **Zero sinais novos no smoke real** (final de domingo, decision_engine filtra agressivamente por janela/threshold), então refetch+blocked não exercitados em produção. Validação efetiva acontecerá organicamente em jogos com mais movimento na semana.
+
+**Estado final:** P5 ✅ wireado. Próximo sinal emitido vai passar pelo refetch obrigatoriamente, blocked rows aparecerão em `blocked_signals` quando aplicável. Mensagem WhatsApp já comunica explicitamente que odd é snapshot.
+
+**Pendências:**
+- Validação real do refetch quando sinais começarem a fluir
+- P4 (renewer supervisor) continua aberto — gargalo operacional principal
+
+---
+
 ## 2026-05-17 — PRIORIDADE 4-B: cache stale TTL adaptativo + AF removido runtime odds
 
 **Contexto:** Decisão D4 aprovada — ZERO AF no path runtime de odds. Cache stale assume quando bridge falha; cache expirado = sinal bloqueado (sistema silente em outage extremo). AF continua em discovery + cold checks.
