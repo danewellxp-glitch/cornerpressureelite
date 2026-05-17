@@ -232,11 +232,12 @@ class BridgeLineupsAdapter:
             source=self.name,
             team_side=team_side,
             formation=lineup_obj.get("formation") if isinstance(lineup_obj.get("formation"), str) else None,
-            coach_name=None,                     # gap Betano (documentado em BETANO_GAPS_LINEUPS)
+            coach_name=None,                     # gap Betano (BETANO_GAPS_LINEUPS)
             starting_eleven=starting_eleven,
             substitutes=substitutes,
             tactical_grid=tactical_grid if tactical_grid else None,
             version=version,
+            missing_players=[],                  # gap Betano (BETANO_GAPS_LINEUPS) — SofaScore enriquece
             raw=raw,
         )
 

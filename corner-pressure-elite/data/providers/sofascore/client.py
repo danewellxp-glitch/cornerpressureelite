@@ -201,9 +201,15 @@ class SofaScoreClient:
         )
         return data.get("standings") if data else None
 
-    async def get_h2h_events(self, event_id: int) -> Optional[list[dict]]:
-        data = await self.get(f"/event/{event_id}/h2h/events")
-        return data.get("events") if data else None
+    async def get_h2h_summary(self, event_id: int) -> Optional[dict]:
+        """Sumário H2H: `{teamDuel, managerDuel}` com contagem W/D/L
+        agregada (não lista de eventos).
+
+        K.1 PARTE B confirmou: `/h2h/events` NÃO existe (404). Histórico
+        de jogos vem via `/team/{id}/events/last/{n}` filtrado pelo time
+        adversário (a implementar em B.6 se necessário pra Fase J).
+        """
+        return await self.get(f"/event/{event_id}/h2h")
 
     async def get_pregame_form(self, event_id: int) -> Optional[dict]:
         return await self.get(f"/event/{event_id}/pregame-form")

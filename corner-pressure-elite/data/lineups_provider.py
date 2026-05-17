@@ -23,16 +23,40 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Optional, Protocol, runtime_checkable
 
 log = logging.getLogger("cpes.providers.lineups")
 
 
-# Campos que Betano NÃO cobre (ver doc G.0 betano-lineups-api.md §2).
-# Documentação explícita pro Composite + downstream saberem o que esperar.
+# Campos que Betano NÃO cobre.
+# - coach_name: gap original G.0 (técnico não vem em event.roster).
+# - missing_players: gap novo K.0 (lesões/suspensões não vêm em event.roster
+#   nem em qualquer payload Betano testado).
+# Composite usa pra enriquecer via SofaScore quando disponível (K.1+).
 BETANO_GAPS_LINEUPS: frozenset[str] = frozenset({
     "coach_name",
+    "missing_players",
 })
+
+
+@dataclass(frozen=True)
+class MissingPlayer:
+    """Jogador ausente do jogo (lesão / suspensão / dúvida).
+
+    Origem: SofaScore `lineups.{side}.missingPlayers[]` (K.0) — Betano não
+    cobre. AF cobre parcialmente via `/injuries`.
+    """
+
+    player_id: Optional[int]
+    name: str
+    # categoria humana: 'injury' | 'suspension' | 'doubtful' | 'unknown'
+    reason: Optional[str] = None
+    # código numérico da fonte (auditoria — SofaScore: int 1..N).
+    reason_code: Optional[int] = None
+    expected_return: Optional[date] = None
+    # 'sofascore' | 'apifootball' (de onde veio o registro).
+    source: str = ""
 
 
 @dataclass(frozen=True)
@@ -60,6 +84,9 @@ class CanonicalLineup:
     substitutes: list[PlayerEntry] = field(default_factory=list)
     tactical_grid: Optional[list[list[int]]] = None  # Betano lineup[][] (player_ids por linha)
     version: Optional[int] = None
+    # Lesões / suspensões / dúvidas (K.0: gap Betano, preenchido por SofaScore).
+    # Sempre `[]` quando `source='bridge_betano'`.
+    missing_players: list[MissingPlayer] = field(default_factory=list)
     raw: dict = field(default_factory=dict)
 
     @property

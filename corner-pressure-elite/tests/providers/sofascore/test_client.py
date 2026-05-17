@@ -52,6 +52,25 @@ async def test_get_live_events_real():
 
 
 @pytest.mark.asyncio
+async def test_h2h_summary_returns_dict():
+    """Smoke real /event/{id}/h2h — confirma que retorna {teamDuel, managerDuel}.
+
+    K.0 capturou esse endpoint. PARTE B descobriu que `/h2h/events` (que
+    estava no plano original) NÃO existe (404). Use `/team/{id}/events/last`
+    se quiser lista de jogos passados entre os times."""
+    # Pega um live event do momento pra garantir dados frescos
+    async with SofaScoreClient() as c:
+        live = await c.get_live_events()
+        assert live, "nenhum jogo live — re-rodar quando houver"
+        event_id = live[0]["id"]
+        data = await c.get_h2h_summary(event_id)
+        assert data is not None, "API devolveu None — endpoint quebrado"
+        # API retorna chaves teamDuel/managerDuel (alguma pode estar vazia)
+        assert any(k in data for k in ("teamDuel", "managerDuel")), \
+            f"sem teamDuel/managerDuel em {list(data.keys())}"
+
+
+@pytest.mark.asyncio
 async def test_rate_limit_throttles():
     """Token bucket: 4 chamadas a 2 req/s ⇒ >= ~1.5s."""
     client = SofaScoreClient(rate_limit_per_sec=2)
