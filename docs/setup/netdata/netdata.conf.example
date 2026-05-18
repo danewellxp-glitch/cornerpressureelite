@@ -1,0 +1,61 @@
+# Netdata config enxuto pro odin (RAM apertada)
+# Footprint alvo: 60-100MB
+
+[global]
+    run as user = netdata
+    # history em segundos: 1h em vez do default 4h
+    history = 3600
+    # update every 2s em vez de 1s pra reduzir CPU
+    update every = 2
+    # bind localhost only (segurança)
+    process scheduling policy = idle
+
+[web]
+    bind to = localhost
+    mode = static-threaded
+    # menos workers (cpu/ram)
+    web server threads = 2
+
+[plugins]
+    # Plugins essenciais
+    proc = yes
+    diskspace = yes
+    cgroups = yes
+    tc = no
+    idlejitter = no
+    # Pesados — desligar
+    ebpf = no
+    apps = no
+    perf = no
+    slabinfo = no
+    # Plugins runtime
+    python.d = yes
+    go.d = yes
+    charts.d = no
+    node.d = no
+    nfacct = no
+    xenstat = no
+    cups = no
+    freeipmi = no
+
+[plugin:proc]
+    # Reduzir granularidade de proc.plugin
+    /proc/diskstats = yes
+    /proc/net/dev = yes
+    /proc/net/sockstat = no
+    /proc/net/sockstat6 = no
+    /proc/net/snmp = yes
+    /proc/net/snmp6 = no
+    /proc/net/netstat = no
+    /proc/net/stat/conntrack = no
+    /proc/net/stat/synproxy = no
+    /proc/net/softnet_stat = no
+    /proc/net/ip_vs/stats = no
+    /sys/class/infiniband = no
+    /sys/class/power_supply = no
+    /sys/devices/system/edac/mc = no
+
+[plugin:cgroups]
+    # Só containers (cpes-*, waha)
+    search for cgroups under PATH /sys/fs/cgroup = yes
+    enable by default cgroups matching =  !*/init.scope  !/system.slice/run-*.scope  !*/user.slice*  !*-qemu.slice*  !*.swap  !*.slice  !/init.scope  !/lxc/*/ns  !/lxc.payload/*/ns  !/machine.slice/*.service  *.scope  *

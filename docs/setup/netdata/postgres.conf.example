@@ -1,0 +1,14 @@
+# /etc/netdata/go.d/postgres.conf
+# Plugin oficial Netdata para Postgres (go.d)
+# Auto-discovery via DSN
+
+update_every: 10
+
+jobs:
+  - name: cpes_postgres
+    # IMPORTANTE: cpes-postgres NAO esta exposto em host port. Conexao via
+    # IP da rede Docker cornerpressureelite_cpes-network (estavel desde container creation).
+    # Se a rede Docker for recriada, atualizar este IP (docker inspect cpes-postgres).
+    dsn: 'postgres://netdata:NETDATA_PG_PWD_PLACEHOLDER@172.18.0.2:5432/cpes?sslmode=disable'
+    collect_databases_matching: 'cpes'
+    timeout: 5

@@ -1,0 +1,63 @@
+# /etc/netdata/health.d/cpes_custom.conf
+# Alertas CPES — chart IDs reais: cpes_metrics.{dual_write, signals, sources_*, blocked_reasons, af}
+
+# ─── DUAL-WRITE COVERAGE (Fase H A1) ───
+
+ alarm: cpes_dual_write_events
+    on: cpes_metrics.dual_write
+lookup: average -2m of events
+ units: %
+ every: 5m
+  warn: $this < 85
+  crit: $this < 70
+ delay: down 5m multiplier 1.5 max 1h
+  info: Cobertura dual-write events_history abaixo do esperado (Fase H A1)
+    to: sysadmin
+
+ alarm: cpes_dual_write_odds
+    on: cpes_metrics.dual_write
+lookup: average -2m of odds
+ units: %
+ every: 5m
+  warn: $this < 85
+  crit: $this < 70
+ delay: down 5m multiplier 1.5 max 1h
+  info: Cobertura dual-write odds_history abaixo do esperado
+    to: sysadmin
+
+ alarm: cpes_dual_write_stats
+    on: cpes_metrics.dual_write
+lookup: average -2m of stats
+ units: %
+ every: 5m
+  warn: $this < 75
+  crit: $this < 50
+ delay: down 5m multiplier 1.5 max 1h
+  info: Cobertura dual-write stats_history baixa (esperado >=75% pos-A1)
+    to: sysadmin
+
+# ─── AF USAGE (devia estar caindo pra zero pos-P4-B) ───
+
+ alarm: cpes_af_odds_usage_high
+    on: cpes_metrics.af
+lookup: average -10m of odds
+ units: requests
+ every: 10m
+  warn: $this > 50
+  crit: $this > 100
+ delay: down 15m
+  info: AF odds usage alto - esperado proximo de zero pos-P4-B
+    to: sysadmin
+
+# ─── SINAIS BLOQUEADOS DEMAIS (P5 health) ───
+
+ alarm: cpes_signals_too_blocked
+    on: cpes_metrics.signals
+  calc: ($emitted + $blocked > 0) ? ($blocked * 100 / ($emitted + $blocked)) : (0)
+ units: %
+ every: 10m
+  warn: $this > 30
+  crit: $this > 60
+ delay: down 30m
+  info: Alta taxa de bloqueio P5 (>30% bloqueados em 24h) - investigar bridge ou cache
+    to: sysadmin

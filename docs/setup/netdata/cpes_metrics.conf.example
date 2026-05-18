@@ -1,0 +1,11 @@
+# /etc/netdata/python.d/cpes_metrics.conf
+# Coletor SQL custom CPES (Fase H + sinais + sources)
+
+# Job 'cpes' — chave vira prefixo dos charts (cpes.dual_write, etc).
+cpes:
+    name: 'cpes_metrics'
+    update_every: 60
+    priority: 60000
+    penalty: yes
+    # Mesma rede Docker que postgres.conf go.d job — IP estavel.
+    dsn: 'postgres://netdata:NETDATA_PG_PWD_PLACEHOLDER@172.18.0.2:5432/cpes'
