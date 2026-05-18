@@ -14,6 +14,49 @@ Commit: hash (se aplicável)
 
 ---
 
+## 2026-05-18 — Dual-write Fase H A1.3 perdia sofa_event_id de SofaScore
+
+**Sintoma:** Netdata custom collector `cpes_metrics.dual_write` mostrou cobertura de `sofa_event_id` por fonte muito abaixo do esperado:
+- `sofascore` em `stats_history`: **54.8%** (esperado ~100%)
+- `sofascore` em `events_history`: **53.2%** (esperado ~100%)
+- `bridge_betano` em 3 tabelas: 63-70% (esperado >85% via mapping)
+
+**Causa raiz:** Os 3 adapters SofaScore (`events_adapter.py:172`, `stats_adapter.py:140`, `lineups_adapter.py:143`) resolviam `sofa_event_id` em runtime pra fazer a chamada à API, mas **descartavam** ele no `return CanonicalEvent/Stats/Lineup(...)` — os dataclasses não tinham o campo. Workers então caíam em `af_sofa_map.get_sofa_id(fixture_id)` como ÚNICA fonte, que só conhece via `af_sofa_fixture_map` table (cobertura parcial — limitada pelo `betano_team_map` de 29% por §13.6 do CLAUDE.md). Resultado: ~45% das capturas SofaScore persistiam sem chave de join apesar do provider ter ACABADO de resolver o ID.
+
+**Fix:**
+1. `CanonicalEvent/Stats/Lineup` ganharam `sofa_event_id: Optional[int] = None`
+2. Os 3 SofaScore adapters populam no return
+3. Os 3 workers (`betano_events/stats/lineups_worker.py`) preferem `entity.sofa_event_id` sobre lookup, com **opportunistic upsert** em `af_sofa_fixture_map` (`mapped_via="provider_native"`) — 1 hit SofaScore alimenta a map pra futuras capturas de bridge/AF do mesmo fixture
+4. Backward-compat preservada (worker com `af_sofa_map=None` segue caminho legado)
+
+Commit `aeff17a`. Tests: 104/104 passam.
+
+**Lição:**
+- Quando um adapter resolve um ID externamente pra fazer uma chamada API, esse ID é DADO valioso — propagar até a persistência por padrão, não tratar como detalhe interno
+- Dual-write coverage só é avaliável com observabilidade granular por fonte (que essa sessão acabou de instalar via Netdata) — sem chart `cpes_metrics.sources_*` o bug ficaria escondido até A2 cutover
+- Opportunistic upsert (escrita em cache de mapeamento quando provider RESOLVE) é padrão útil — converte uma resolução pontual em melhoria sistêmica de cobertura
+
+---
+
+## 2026-05-18 — Alerta `cpes_af_odds_usage_high` semanticamente errado (agregado 24h)
+
+**Sintoma:** Logo após instalar Netdata, alerta `cpes_af_odds_usage_high` disparou CRITICAL (473 reqs AF). Confuso porque P4-B (`REMOVE_AF_FROM_ODDS_RUNTIME=true`) está ativo desde ~18:15 UTC de 17/05.
+
+**Causa raiz:** O collector `cpes_metrics` agrega `COUNT(*) FROM odds_history WHERE source='apifootball' AND captured_at > NOW() - INTERVAL '24 hours'`. O alerta `lookup average -10m of odds` lê esse valor mas o NÚMERO em si é uma janela de 24h. Resultado: alerta dispara mesmo quando AF caiu pra zero hoje — porque os 473 reqs das 3h antes do cutover ainda estão na janela de 24h.
+
+**Fix proposto** (não aplicado nesta sessão): refactor collector pra exportar:
+- `af_odds_1h`: capturas última 1h (esperado: 0 pós-P4-B)
+- `af_odds_24h`: capturas 24h (chart histórico, sem alerta)
+- Alerta usa `af_odds_1h` em vez de `odds` (que vira `af_odds_24h`)
+
+Workaround atual: ignorar CRITICAL desse alerta nas primeiras 24h pós-deploy de qualquer mudança em fluxo AF. Vai limpar sozinho passando 18:15 UTC + 24h.
+
+**Lição:**
+- Alertas precisam medir **janelas curtas** (1h, 5m), não agregados longos (24h). Agregados servem pra TENDÊNCIA (histórico), não pra DECISÃO (warn/crit ON/OFF)
+- Quando criar métricas pra Netdata, separar `metric_24h` (chart bonito, sem alarme) de `metric_1h` (chart com alarme rápido) — naming explícito da janela evita confusão
+
+---
+
 ## 2026-05-17 — Login não entra no dashboard (redirect loop)
 
 **Sintoma:** Usuário logava em `iqpressure.online/login` com sucesso (API retornava 200 + token), cookie `cpes-auth` era setado, mas qualquer navegação pra `/dashboard` redirecionava de volta pro `/login` infinitamente.
