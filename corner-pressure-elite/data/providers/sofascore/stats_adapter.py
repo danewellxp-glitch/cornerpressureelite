@@ -239,4 +239,5 @@ class SofaScoreStatsAdapter:
             stats_1h=_period_summary("1ST"),
             stats_2h=_period_summary("2ND"),
             raw={"sofa_event_id": sofa_event_id, "statistics": raw_stats},
+            sofa_event_id=sofa_event_id,
         )

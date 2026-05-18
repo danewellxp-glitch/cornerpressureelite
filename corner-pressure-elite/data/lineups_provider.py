@@ -88,6 +88,7 @@ class CanonicalLineup:
     # Sempre `[]` quando `source='bridge_betano'`.
     missing_players: list[MissingPlayer] = field(default_factory=list)
     raw: dict = field(default_factory=dict)
+    sofa_event_id: Optional[int] = None  # H A1.3 fix: SofaScore conhece nativamente
 
     @property
     def has_starting_eleven(self) -> bool:

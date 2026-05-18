@@ -87,16 +87,28 @@ class BetanoEventsWorker:
             return 0, 0
 
         try:
-            # Fase H A1.3: dual-write sofa_event_id se af_sofa_map injetado.
-            # Caminho default (sem af_sofa_map) preserva backward-compat com
-            # fakes/tests que ainda nao aceitam o kwarg.
+            # Fase H A1.3 + fix: sofa_event_id pode vir nativo do provider
+            # (SofaScore resolve em runtime e populates entity.sofa_event_id)
+            # OU via mapping table af_sofa_fixture_map (bridge/AF que so
+            # conhecem fixture_id). Provider native tem prioridade.
+            sofa_event_id: Optional[int] = events[0].sofa_event_id if events else None
             if self._af_sofa_map is not None:
-                try:
-                    sofa_event_id = await self._af_sofa_map.get_sofa_id(fixture_id)
-                except Exception as e:
-                    log.debug("betano_events_worker.af_sofa_lookup_error fixture=%d err=%s",
-                              fixture_id, e)
-                    sofa_event_id = None
+                if sofa_event_id is None:
+                    try:
+                        sofa_event_id = await self._af_sofa_map.get_sofa_id(fixture_id)
+                    except Exception as e:
+                        log.debug("betano_events_worker.af_sofa_lookup_error fixture=%d err=%s",
+                                  fixture_id, e)
+                else:
+                    # Opportunistic upsert: 1 hit SofaScore beneficia N
+                    # capturas futuras de bridge/AF do mesmo fixture.
+                    try:
+                        await self._af_sofa_map.upsert(
+                            fixture_id, sofa_event_id, mapped_via="provider_native",
+                        )
+                    except Exception as e:
+                        log.debug("betano_events_worker.opportunistic_upsert_failed fixture=%d err=%s",
+                                  fixture_id, e)
                 inserted, skipped = await self._repo.upsert_batch(events, sofa_event_id=sofa_event_id)
             else:
                 inserted, skipped = await self._repo.upsert_batch(events)

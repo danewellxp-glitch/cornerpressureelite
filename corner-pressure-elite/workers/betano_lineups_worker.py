@@ -127,14 +127,24 @@ class BetanoLineupsWorker:
             return 0, 0
 
         try:
-            # Fase H A1.3: dual-write sofa_event_id se af_sofa_map injetado.
+            # Fase H A1.3 + fix: prioriza provider native (SofaScore) sobre
+            # af_sofa_map lookup. Opportunistic upsert beneficia capturas futuras.
+            sofa_event_id: Optional[int] = lineups[0].sofa_event_id if lineups else None
             if self._af_sofa_map is not None:
-                try:
-                    sofa_event_id = await self._af_sofa_map.get_sofa_id(fixture_id)
-                except Exception as e:
-                    log.debug("betano_lineups_worker.af_sofa_lookup_error fixture=%d err=%s",
-                              fixture_id, e)
-                    sofa_event_id = None
+                if sofa_event_id is None:
+                    try:
+                        sofa_event_id = await self._af_sofa_map.get_sofa_id(fixture_id)
+                    except Exception as e:
+                        log.debug("betano_lineups_worker.af_sofa_lookup_error fixture=%d err=%s",
+                                  fixture_id, e)
+                else:
+                    try:
+                        await self._af_sofa_map.upsert(
+                            fixture_id, sofa_event_id, mapped_via="provider_native",
+                        )
+                    except Exception as e:
+                        log.debug("betano_lineups_worker.opportunistic_upsert_failed fixture=%d err=%s",
+                                  fixture_id, e)
                 inserted, skipped = await self._repo.upsert_batch(lineups, sofa_event_id=sofa_event_id)
             else:
                 inserted, skipped = await self._repo.upsert_batch(lineups)

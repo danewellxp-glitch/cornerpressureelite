@@ -171,10 +171,10 @@ class SofaScoreLineupsAdapter:
 
         return [
             self._normalize_team(
-                raw_lineups.get("home") or {}, "home", coach_home, fixture_id,
+                raw_lineups.get("home") or {}, "home", coach_home, fixture_id, sofa_event_id,
             ),
             self._normalize_team(
-                raw_lineups.get("away") or {}, "away", coach_away, fixture_id,
+                raw_lineups.get("away") or {}, "away", coach_away, fixture_id, sofa_event_id,
             ),
         ]
 
@@ -187,6 +187,7 @@ class SofaScoreLineupsAdapter:
         team_side: str,
         coach_name: Optional[str],
         fixture_id: int,
+        sofa_event_id: Optional[int] = None,
     ) -> CanonicalLineup:
         players = raw_team.get("players") or []
         starting: list[PlayerEntry] = []
@@ -219,6 +220,7 @@ class SofaScoreLineupsAdapter:
             version=None,
             missing_players=missing,
             raw=raw_team,
+            sofa_event_id=sofa_event_id,
         )
 
     def _normalize_player(self, raw: dict) -> Optional[PlayerEntry]:

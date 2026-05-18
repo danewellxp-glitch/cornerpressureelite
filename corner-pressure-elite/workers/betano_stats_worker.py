@@ -106,14 +106,25 @@ class BetanoStatsWorker:
             yellow_last_10min=windows["yellow_last_10min"],
         )
 
-        # Fase H A1.3: lookup sofa_event_id pra dual-write (None se unresolved)
-        sofa_event_id: Optional[int] = None
+        # Fase H A1.3 + fix: provider native (SofaScore) tem prioridade sobre
+        # af_sofa_map lookup. Quando snapshot vem com sofa_event_id, faz upsert
+        # opportunistico pra beneficiar futuras capturas bridge/AF do fixture.
+        sofa_event_id: Optional[int] = enriched.sofa_event_id
         if self._af_sofa_map is not None:
-            try:
-                sofa_event_id = await self._af_sofa_map.get_sofa_id(snapshot.fixture_id)
-            except Exception as e:
-                log.debug("betano_stats_worker.af_sofa_lookup_error fixture=%d err=%s",
-                          snapshot.fixture_id, e)
+            if sofa_event_id is None:
+                try:
+                    sofa_event_id = await self._af_sofa_map.get_sofa_id(snapshot.fixture_id)
+                except Exception as e:
+                    log.debug("betano_stats_worker.af_sofa_lookup_error fixture=%d err=%s",
+                              snapshot.fixture_id, e)
+            else:
+                try:
+                    await self._af_sofa_map.upsert(
+                        snapshot.fixture_id, sofa_event_id, mapped_via="provider_native",
+                    )
+                except Exception as e:
+                    log.debug("betano_stats_worker.opportunistic_upsert_failed fixture=%d err=%s",
+                              snapshot.fixture_id, e)
 
         try:
             entry = _to_entry(enriched, captured_at, freshness)

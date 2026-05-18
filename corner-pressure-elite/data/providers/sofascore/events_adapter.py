@@ -187,7 +187,7 @@ class SofaScoreEventsAdapter:
 
         out: list[CanonicalEvent] = []
         for inc in raw_incidents:
-            normalized = self._normalize_incident(fixture_id, inc)
+            normalized = self._normalize_incident(fixture_id, inc, sofa_event_id)
             if normalized is not None:
                 out.append(normalized)
         return out
@@ -213,7 +213,7 @@ class SofaScoreEventsAdapter:
         return await self._resolver(synth)
 
     def _normalize_incident(
-        self, fixture_id: int, inc: dict
+        self, fixture_id: int, inc: dict, sofa_event_id: Optional[int] = None
     ) -> Optional[CanonicalEvent]:
         if not isinstance(inc, dict):
             return None
@@ -248,4 +248,5 @@ class SofaScoreEventsAdapter:
                 "text": inc.get("text"),
             },
             raw=inc,
+            sofa_event_id=sofa_event_id,
         )

@@ -49,6 +49,7 @@ class CanonicalEvent:
     player_name: Optional[str] = None        # opcional
     props: dict = field(default_factory=dict)   # campos específicos do provider
     raw: dict = field(default_factory=dict)     # incident original preservado
+    sofa_event_id: Optional[int] = None         # H A1.3 fix: SofaScore conhece nativamente
 
 
 @runtime_checkable

@@ -113,6 +113,9 @@ class CanonicalStats:
     enriched_by: Optional[list[str]] = None
     """Lista de providers que enriqueceram o snapshot (ordem cronológica
     do enrichment). None = sem enrichment. Ex: ['sofascore']."""
+    sofa_event_id: Optional[int] = None
+    """H A1.3 fix: SofaScore conhece nativamente (resolve em runtime). Bridge/AF
+    deixam None — worker faz fallback via af_sofa_fixture_map."""
     is_cached: bool = False
     """True quando snapshot vem do cache interno do adapter (304 Not Modified).
 
