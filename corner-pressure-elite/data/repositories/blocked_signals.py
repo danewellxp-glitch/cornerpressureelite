@@ -29,16 +29,18 @@ class BlockedSignalsRepo:
         fresh_odd: Optional[float],
         drift_pct: Optional[float],
         metadata: Optional[dict] = None,
+        sofa_event_id: Optional[int] = None,
     ) -> None:
         async with self._pool.acquire() as conn:
             await conn.execute(
                 """
                 INSERT INTO blocked_signals
                   (fixture_id, market_kind, linha, reason,
-                   orig_odd, fresh_odd, drift_pct, metadata)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+                   orig_odd, fresh_odd, drift_pct, metadata, sofa_event_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
                 """,
                 fixture_id, market_kind, linha, reason,
                 orig_odd, fresh_odd, drift_pct,
                 json.dumps(metadata or {}, ensure_ascii=False),
+                sofa_event_id,
             )

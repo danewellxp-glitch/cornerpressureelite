@@ -59,18 +59,26 @@ class LineupsHistoryRepo:
     def __init__(self, pool):
         self._pool = pool
 
-    async def upsert_lineup(self, lineup: "CanonicalLineup") -> bool:
-        """INSERT idempotente. Returns True se inseriu, False se duplicate."""
+    async def upsert_lineup(
+        self,
+        lineup: "CanonicalLineup",
+        sofa_event_id: Optional[int] = None,
+    ) -> bool:
+        """INSERT idempotente. Returns True se inseriu, False se duplicate.
+
+        sofa_event_id (Fase H A1.3): dual-write. None = unresolved.
+        COALESCE em ON CONFLICT preserva valor existente.
+        """
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 INSERT INTO lineups_history
                   (fixture_id, source, team_side, formation, coach_name,
                    starting_eleven, substitutes, tactical_grid,
-                   version, raw, missing_players)
+                   version, raw, missing_players, sofa_event_id)
                 VALUES ($1, $2, $3, $4, $5,
                         $6::jsonb, $7::jsonb, $8::jsonb,
-                        $9, $10::jsonb, $11::jsonb)
+                        $9, $10::jsonb, $11::jsonb, $12)
                 ON CONFLICT (fixture_id, source, team_side) DO NOTHING
                 RETURNING id
                 """,
@@ -85,13 +93,20 @@ class LineupsHistoryRepo:
                 lineup.version,
                 json.dumps(lineup.raw or {}, ensure_ascii=False),
                 _serialize_missing(lineup.missing_players),
+                sofa_event_id,
             )
         return row is not None
 
     async def upsert_batch(
-        self, lineups: list["CanonicalLineup"]
+        self,
+        lineups: list["CanonicalLineup"],
+        sofa_event_id: Optional[int] = None,
     ) -> tuple[int, int]:
-        """Bulk upsert. Returns (inserted, skipped_duplicates)."""
+        """Bulk upsert. Returns (inserted, skipped_duplicates).
+
+        sofa_event_id (Fase H A1.3): aplicado a todos lineups do batch
+        (mesmo fixture). COALESCE preserva valor existente em duplicates.
+        """
         if not lineups:
             return 0, 0
         inserted = 0
@@ -103,12 +118,13 @@ class LineupsHistoryRepo:
                         INSERT INTO lineups_history
                           (fixture_id, source, team_side, formation, coach_name,
                            starting_eleven, substitutes, tactical_grid,
-                           version, raw, missing_players)
+                           version, raw, missing_players, sofa_event_id)
                         VALUES ($1, $2, $3, $4, $5,
                                 $6::jsonb, $7::jsonb, $8::jsonb,
-                                $9, $10::jsonb, $11::jsonb)
-                        ON CONFLICT (fixture_id, source, team_side) DO NOTHING
-                        RETURNING id
+                                $9, $10::jsonb, $11::jsonb, $12)
+                        ON CONFLICT (fixture_id, source, team_side)
+                          DO UPDATE SET sofa_event_id = COALESCE(lineups_history.sofa_event_id, EXCLUDED.sofa_event_id)
+                        RETURNING id, (xmax = 0) AS inserted
                         """,
                         ln.fixture_id, ln.source, ln.team_side,
                         ln.formation, ln.coach_name,
@@ -118,6 +134,7 @@ class LineupsHistoryRepo:
                         ln.version,
                         json.dumps(ln.raw or {}, ensure_ascii=False),
                         _serialize_missing(ln.missing_players),
+                        sofa_event_id,
                     )
                     if row is not None:
                         inserted += 1

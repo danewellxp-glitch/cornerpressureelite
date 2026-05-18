@@ -233,8 +233,13 @@ class CornerPressureElite:
             # Telemetria de odds (Fase D.0): worker batcha inserts em
             # odds_history. Iniciado ANTES de build_providers — o adapter
             # Betano recebe a referência via factory.
+            # Fase H A1.3: dual-write sofa_event_id. Repo compartilhado entre
+            # todos workers + database.registrar_sinal* (lookup cached LRU).
+            from data.repositories.af_sofa_map import AfSofaFixtureMapRepo
+            self.af_sofa_map_repo = AfSofaFixtureMapRepo(self.database.pool)
             self.odds_persistence_worker = OddsPersistenceWorker(
-                OddsHistoryRepo(self.database.pool)
+                OddsHistoryRepo(self.database.pool),
+                af_sofa_map=self.af_sofa_map_repo,
             )
             await self.odds_persistence_worker.start()
             logger.info("OddsPersistenceWorker iniciado — telemetria de odds ATIVA")
@@ -332,6 +337,7 @@ class CornerPressureElite:
                     repo=stats_history_repo,
                     calculator=stats_calculator,
                     bootstrap_lookback_min=STATS_BOOTSTRAP_LOOKBACK_MIN,
+                    af_sofa_map=self.af_sofa_map_repo,
                 )
                 logger.info(
                     "BetanoStatsWorker ativo — stats via bridge (Fase E.1 PARTE F')"
@@ -363,6 +369,7 @@ class CornerPressureElite:
                 self.events_worker = BetanoEventsWorker(
                     provider=composite_events,
                     repo=events_repo,
+                    af_sofa_map=self.af_sofa_map_repo,
                 )
                 logger.info(
                     "BetanoEventsWorker ativo — events via bridge (Fase F)"
@@ -395,6 +402,7 @@ class CornerPressureElite:
                     provider=composite_lineups,
                     repo=lineups_repo,
                     max_minute=LINEUPS_MAX_MINUTE,
+                    af_sofa_map=self.af_sofa_map_repo,
                 )
                 logger.info(
                     "BetanoLineupsWorker ativo — lineups via bridge (Fase G.1) max_minute=%d",
@@ -1395,6 +1403,7 @@ class CornerPressureElite:
                         self.composite_odds, canonical_fixture, score, jogo,
                         max_drift_pct=config.ODDS_REFETCH_MAX_DRIFT_PCT,
                         blocked_repo=getattr(self, "blocked_signals_repo", None),
+                        af_sofa_map=getattr(self, "af_sofa_map_repo", None),
                     )
                     if not refetch_ok:
                         logger.warning(
@@ -1418,7 +1427,14 @@ class CornerPressureElite:
                         f"{sinal.jogo.descricao}"
                     )
                     self.notifier.commit_corner_signal(sinal)
-                    await self.database.registrar_sinal(sinal)
+                    # Fase H A1.3: dual-write sofa_event_id via lookup cached.
+                    sofa_id = None
+                    if getattr(self, "af_sofa_map_repo", None) is not None:
+                        try:
+                            sofa_id = await self.af_sofa_map_repo.get_sofa_id(sinal.jogo.id)
+                        except Exception:
+                            pass
+                    await self.database.registrar_sinal(sinal, sofa_event_id=sofa_id)
                     self.state_manager.registrar_alerta(sinal)
 
                 elif self.state_manager.deve_reavaliar(fixture_id, sinal):
@@ -1497,6 +1513,7 @@ class CornerPressureElite:
                                     self.composite_odds, canonical_fixture, score, jogo,
                                     max_drift_pct=config.ODDS_REFETCH_MAX_DRIFT_PCT,
                                     blocked_repo=getattr(self, "blocked_signals_repo", None),
+                                    af_sofa_map=getattr(self, "af_sofa_map_repo", None),
                                 )
                                 if not refetch_ok_cards:
                                     logger.warning(
@@ -1526,7 +1543,14 @@ class CornerPressureElite:
                                     f"{sinal_cartoes.jogo.descricao}"
                                 )
                                 self.notifier.commit_cards_signal(sinal_cartoes)
-                                await self.database.registrar_sinal_cartoes(sinal_cartoes)
+                                # Fase H A1.3: dual-write sofa_event_id
+                                sofa_id_c = None
+                                if getattr(self, "af_sofa_map_repo", None) is not None:
+                                    try:
+                                        sofa_id_c = await self.af_sofa_map_repo.get_sofa_id(sinal_cartoes.jogo.id)
+                                    except Exception:
+                                        pass
+                                await self.database.registrar_sinal_cartoes(sinal_cartoes, sofa_event_id=sofa_id_c)
                                 self.cards_state_manager.registrar_alerta(sinal_cartoes)
 
                             elif self.cards_state_manager.deve_reavaliar(fixture_id, sinal_cartoes):

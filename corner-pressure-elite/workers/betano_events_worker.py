@@ -18,6 +18,7 @@ import logging
 from typing import Any, Optional, Protocol
 
 from data.events_provider import CanonicalEvent
+from data.repositories.af_sofa_map import AfSofaFixtureMapRepo
 from data.repositories.events_history import EventsHistoryRepo
 
 log = logging.getLogger("cpes.workers.betano_events")
@@ -40,9 +41,15 @@ class _EventsSource(Protocol):
 
 
 class BetanoEventsWorker:
-    def __init__(self, provider: _EventsSource, repo: EventsHistoryRepo):
+    def __init__(
+        self,
+        provider: _EventsSource,
+        repo: EventsHistoryRepo,
+        af_sofa_map: Optional[AfSofaFixtureMapRepo] = None,
+    ):
         self._provider = provider
         self._repo = repo
+        self._af_sofa_map = af_sofa_map
 
     async def capture(
         self,
@@ -80,7 +87,19 @@ class BetanoEventsWorker:
             return 0, 0
 
         try:
-            inserted, skipped = await self._repo.upsert_batch(events)
+            # Fase H A1.3: dual-write sofa_event_id se af_sofa_map injetado.
+            # Caminho default (sem af_sofa_map) preserva backward-compat com
+            # fakes/tests que ainda nao aceitam o kwarg.
+            if self._af_sofa_map is not None:
+                try:
+                    sofa_event_id = await self._af_sofa_map.get_sofa_id(fixture_id)
+                except Exception as e:
+                    log.debug("betano_events_worker.af_sofa_lookup_error fixture=%d err=%s",
+                              fixture_id, e)
+                    sofa_event_id = None
+                inserted, skipped = await self._repo.upsert_batch(events, sofa_event_id=sofa_event_id)
+            else:
+                inserted, skipped = await self._repo.upsert_batch(events)
         except Exception as e:
             log.warning(
                 "betano_events_worker.persist_error fixture=%d events=%d err=%s",

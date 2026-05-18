@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Optional
 
+from data.repositories.af_sofa_map import AfSofaFixtureMapRepo
 from data.repositories.odds_history import OddsHistoryEntry, OddsHistoryRepo
 
 from ._base import _BaseBatchWorker
@@ -22,6 +24,7 @@ class OddsPersistenceWorker(_BaseBatchWorker[OddsHistoryEntry]):
         queue_size: int = 10000,
         batch_size: int = 10,
         batch_timeout_s: float = 5.0,
+        af_sofa_map: Optional[AfSofaFixtureMapRepo] = None,
     ):
         super().__init__(
             name="odds_worker",
@@ -30,8 +33,23 @@ class OddsPersistenceWorker(_BaseBatchWorker[OddsHistoryEntry]):
             batch_timeout_s=batch_timeout_s,
         )
         self._repo = repo
+        self._af_sofa_map = af_sofa_map
 
     async def flush(self, batch: list[OddsHistoryEntry]) -> None:
+        # Fase H A1.3: enriquece batch com sofa_event_id via cache LRU.
+        # Lookup eh O(1) cached + barato. Misses ficam com None (orfao).
+        if self._af_sofa_map is not None:
+            enriched: list[OddsHistoryEntry] = []
+            for e in batch:
+                if e.sofa_event_id is not None:
+                    enriched.append(e)
+                    continue
+                try:
+                    sofa_id = await self._af_sofa_map.get_sofa_id(e.fixture_id)
+                except Exception:
+                    sofa_id = None
+                enriched.append(replace(e, sofa_event_id=sofa_id))
+            batch = enriched
         await self._repo.bulk_insert(batch)
 
     # ---- helper consumido pelo CompositeOddsProvider via duck typing ----

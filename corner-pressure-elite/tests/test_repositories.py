@@ -110,8 +110,8 @@ async def test_odds_history_bulk_insert_sends_all_rows():
     sql, rows = pool.conn.execute_many[0]
     assert "INSERT INTO odds_history" in sql
     assert len(rows) == 3
-    # 15 colunas (Fase D.0 acrescentou captured_at)
-    assert all(len(r) == 15 for r in rows)
+    # 18 colunas: 15 originais + is_stale + source_age_seconds (P4-B) + sofa_event_id (Fase H A1.3)
+    assert all(len(r) == 18 for r in rows)
 
 
 @pytest.mark.asyncio

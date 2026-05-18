@@ -419,7 +419,11 @@ class Database:
                 )
         logger.info("Initialized thresholds config with defaults")
 
-    async def registrar_sinal(self, sinal: Sinal) -> int:
+    async def registrar_sinal(
+        self,
+        sinal: Sinal,
+        sofa_event_id: Optional[int] = None,
+    ) -> int:
         jogo = sinal.jogo
         await self.connect()
         async with self.pool.acquire() as conn:
@@ -430,8 +434,9 @@ class Database:
                         timestamp, liga_id, liga_nome, jogo_id, jogo_descricao,
                         minuto, placar, escanteios_total, linha, odd,
                         projecao, edge, pressure_score, tipo_sinal, reavaliacao,
-                        matching_tiers, bookmaker_usado, linha_betano, linha_bet365
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                        matching_tiers, bookmaker_usado, linha_betano, linha_bet365,
+                        sofa_event_id
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
                     RETURNING id
                     """,
                     datetime.now(), jogo.liga_id, jogo.liga_nome, jogo.id, jogo.descricao,
@@ -441,6 +446,7 @@ class Database:
                     jogo.bookmaker_usado or None,
                     jogo.linha_betano if jogo.linha_betano > 0 else None,
                     jogo.linha_bet365 if jogo.linha_bet365 > 0 else None,
+                    sofa_event_id,
                 )
                 await conn.execute(
                     """
@@ -456,7 +462,11 @@ class Database:
         logger.info(f"Sinal #{sinal_id} registrado no banco")
         return sinal_id
 
-    async def registrar_sinal_cartoes(self, sinal: SinalCartoes) -> int:
+    async def registrar_sinal_cartoes(
+        self,
+        sinal: SinalCartoes,
+        sofa_event_id: Optional[int] = None,
+    ) -> int:
         jogo = sinal.jogo
         await self.connect()
         async with self.pool.acquire() as conn:
@@ -467,14 +477,15 @@ class Database:
                         timestamp, liga_id, liga_nome, jogo_id, jogo_descricao,
                         minuto, placar, escanteios_total, linha, odd,
                         projecao, edge, pressure_score, tipo_sinal, reavaliacao,
-                        tipo_analise, matching_tiers
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                        tipo_analise, matching_tiers, sofa_event_id
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
                     RETURNING id
                     """,
                     datetime.now(), jogo.liga_id, jogo.liga_nome, jogo.id, jogo.descricao,
                     jogo.minuto, jogo.placar, jogo.cartoes_amarelos_total, jogo.linha_cartoes,
                     jogo.odd_cartoes, sinal.projecao_cartoes, sinal.edge, sinal.tension_score,
-                    sinal.tipo, sinal.reavaliacao, 'CARTOES', sinal.matching_tiers
+                    sinal.tipo, sinal.reavaliacao, 'CARTOES', sinal.matching_tiers,
+                    sofa_event_id,
                 )
                 await conn.execute(
                     """

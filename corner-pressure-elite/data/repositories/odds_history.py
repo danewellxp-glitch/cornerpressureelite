@@ -32,6 +32,8 @@ class OddsHistoryEntry:
     # P4-B (2026-05-17): cache stale tracking
     is_stale: bool = False
     source_age_seconds: int = 0
+    # Fase H A1.3 (2026-05-17): dual-write sofa_event_id (None = unresolved)
+    sofa_event_id: Optional[int] = None
 
 
 class OddsHistoryRepo:
@@ -50,6 +52,7 @@ class OddsHistoryRepo:
                 e.captured_at,
                 json.dumps(e.raw or {}, ensure_ascii=False),
                 e.is_stale, e.source_age_seconds,
+                e.sofa_event_id,
             )
             for e in entries
         ]
@@ -61,9 +64,9 @@ class OddsHistoryRepo:
                    linha, odd_over, odd_under,
                    minute, score_home, score_away,
                    pressure_score, tension_score, provider_pressure,
-                   captured_at, raw, is_stale, source_age_seconds)
+                   captured_at, raw, is_stale, source_age_seconds, sofa_event_id)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
-                        COALESCE($14, NOW()), $15::jsonb, $16, $17)
+                        COALESCE($14, NOW()), $15::jsonb, $16, $17, $18)
                 """,
                 rows,
             )

@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Protocol
 
 from data.odds_provider import CanonicalFixture
+from data.repositories.af_sofa_map import AfSofaFixtureMapRepo
 from data.repositories.stats_history import StatsHistoryEntry, StatsHistoryRepo
 from data.services.stats_window_calculator import StatsWindowCalculator
 from data.stats_provider import CanonicalStats
@@ -45,12 +46,14 @@ class BetanoStatsWorker:
         repo: StatsHistoryRepo,
         calculator: StatsWindowCalculator,
         bootstrap_lookback_min: int = 20,
+        af_sofa_map: Optional[AfSofaFixtureMapRepo] = None,
     ):
         self._adapter = adapter
         self._repo = repo
         self._calculator = calculator
         self._bootstrap_lookback_min = bootstrap_lookback_min
         self._bootstrapped: set[int] = set()
+        self._af_sofa_map = af_sofa_map
 
     async def poll(self, fixture: CanonicalFixture) -> Optional[CanonicalStats]:
         """Roda 1 ciclo de captura+enrichment+persistência. Retorna `CanonicalStats`
@@ -103,8 +106,19 @@ class BetanoStatsWorker:
             yellow_last_10min=windows["yellow_last_10min"],
         )
 
+        # Fase H A1.3: lookup sofa_event_id pra dual-write (None se unresolved)
+        sofa_event_id: Optional[int] = None
+        if self._af_sofa_map is not None:
+            try:
+                sofa_event_id = await self._af_sofa_map.get_sofa_id(snapshot.fixture_id)
+            except Exception as e:
+                log.debug("betano_stats_worker.af_sofa_lookup_error fixture=%d err=%s",
+                          snapshot.fixture_id, e)
+
         try:
-            await self._repo.insert(_to_entry(enriched, captured_at, freshness))
+            entry = _to_entry(enriched, captured_at, freshness)
+            entry = replace(entry, sofa_event_id=sofa_event_id)
+            await self._repo.insert(entry)
         except Exception as e:
             log.warning(
                 "betano_stats_worker.persist_error fixture=%d version=%s freshness=%s err=%s",

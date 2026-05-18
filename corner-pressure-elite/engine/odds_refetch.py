@@ -32,6 +32,7 @@ async def refetch_validate_corners(
     max_drift_pct: float = 0.15,
     *,
     blocked_repo=None,
+    af_sofa_map=None,
 ) -> bool:
     """Retorna True se ok pra emitir, False se abort.
 
@@ -50,6 +51,7 @@ async def refetch_validate_corners(
         market_kind="corners",
         max_drift_pct=max_drift_pct,
         blocked_repo=blocked_repo,
+        af_sofa_map=af_sofa_map,
     )
 
 
@@ -61,6 +63,7 @@ async def refetch_validate_cards(
     max_drift_pct: float = 0.15,
     *,
     blocked_repo=None,
+    af_sofa_map=None,
 ) -> bool:
     return await _refetch_validate(
         composite_odds,
@@ -74,6 +77,7 @@ async def refetch_validate_cards(
         market_kind="cards",
         max_drift_pct=max_drift_pct,
         blocked_repo=blocked_repo,
+        af_sofa_map=af_sofa_map,
     )
 
 
@@ -90,8 +94,16 @@ async def _refetch_validate(
     market_kind: str,
     max_drift_pct: float,
     blocked_repo=None,
+    af_sofa_map=None,
 ) -> bool:
     fid = canonical_fixture.fixture_id
+    # Fase H A1.3: resolve sofa_event_id pra dual-write em blocked_signals
+    _sofa_id: Optional[int] = None
+    if af_sofa_map is not None:
+        try:
+            _sofa_id = await af_sofa_map.get_sofa_id(fid)
+        except Exception:
+            _sofa_id = None
     try:
         fresh = await getattr(composite_odds, method)(
             canonical_fixture, current_score=current_score, line=None,
@@ -103,7 +115,8 @@ async def _refetch_validate(
         )
         await _record_block(blocked_repo, fid, market_kind, orig_linha,
                             "refetch_exception", orig_odd, None, None,
-                            metadata={"err": str(e)[:200]})
+                            metadata={"err": str(e)[:200]},
+                            sofa_event_id=_sofa_id)
         return False
 
     if fresh is None:
@@ -112,7 +125,8 @@ async def _refetch_validate(
             fid, market_kind,
         )
         await _record_block(blocked_repo, fid, market_kind, orig_linha,
-                            "refetch_none", orig_odd, None, None)
+                            "refetch_none", orig_odd, None, None,
+                            sofa_event_id=_sofa_id)
         return False
 
     if getattr(fresh, "is_stale", False):
@@ -122,7 +136,8 @@ async def _refetch_validate(
         )
         await _record_block(blocked_repo, fid, market_kind, orig_linha,
                             "refetch_stale", orig_odd, fresh.odd_over, None,
-                            metadata={"age_seconds": getattr(fresh, "age_seconds", 0)})
+                            metadata={"age_seconds": getattr(fresh, "age_seconds", 0)},
+                            sofa_event_id=_sofa_id)
         return False
 
     if abs(fresh.linha - orig_linha) > 0.01:
@@ -132,7 +147,8 @@ async def _refetch_validate(
         )
         await _record_block(blocked_repo, fid, market_kind, orig_linha,
                             "line_changed", orig_odd, fresh.odd_over, None,
-                            metadata={"fresh_linha": fresh.linha})
+                            metadata={"fresh_linha": fresh.linha},
+                            sofa_event_id=_sofa_id)
         return False
 
     if orig_odd <= 0:
@@ -147,7 +163,8 @@ async def _refetch_validate(
             fid, market_kind, orig_odd, fresh.odd_over, drift * 100, max_drift_pct * 100,
         )
         await _record_block(blocked_repo, fid, market_kind, orig_linha,
-                            "odd_drift", orig_odd, fresh.odd_over, drift * 100)
+                            "odd_drift", orig_odd, fresh.odd_over, drift * 100,
+                            sofa_event_id=_sofa_id)
         return False
 
     if drift > 0.0:
@@ -170,6 +187,7 @@ async def _record_block(
     fresh_odd: Optional[float],
     drift_pct: Optional[float],
     metadata: Optional[dict] = None,
+    sofa_event_id: Optional[int] = None,
 ) -> None:
     if blocked_repo is None:
         return
@@ -178,6 +196,7 @@ async def _record_block(
             fixture_id=fixture_id, market_kind=market_kind, linha=linha,
             reason=reason, orig_odd=orig_odd, fresh_odd=fresh_odd,
             drift_pct=drift_pct, metadata=metadata,
+            sofa_event_id=sofa_event_id,
         )
     except Exception as e:
         log.warning("refetch.record_block_failed fixture=%d err=%s", fixture_id, e)

@@ -23,15 +23,22 @@ class EventsHistoryRepo:
     def __init__(self, pool):
         self._pool = pool
 
-    async def upsert_event(self, event: "CanonicalEvent") -> bool:
-        """INSERT idempotente (dedup UNIQUE). Returns True se inseriu, False se duplicate."""
+    async def upsert_event(
+        self,
+        event: "CanonicalEvent",
+        sofa_event_id: Optional[int] = None,
+    ) -> bool:
+        """INSERT idempotente (dedup UNIQUE). Returns True se inseriu, False se duplicate.
+
+        sofa_event_id (Fase H A1.3): dual-write. None = unresolved.
+        """
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 INSERT INTO events_history
                   (fixture_id, source, event_type, event_minute, event_second,
-                   team_side, player_name, props, raw)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)
+                   team_side, player_name, props, raw, sofa_event_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10)
                 ON CONFLICT (fixture_id, source, event_type, event_minute, team_side, player_name)
                   DO NOTHING
                 RETURNING id
@@ -41,16 +48,25 @@ class EventsHistoryRepo:
                 event.team_side, event.player_name,
                 json.dumps(event.props or {}, ensure_ascii=False),
                 json.dumps(event.raw or {}, ensure_ascii=False),
+                sofa_event_id,
             )
         return row is not None
 
-    async def upsert_batch(self, events: list["CanonicalEvent"]) -> tuple[int, int]:
+    async def upsert_batch(
+        self,
+        events: list["CanonicalEvent"],
+        sofa_event_id: Optional[int] = None,
+    ) -> tuple[int, int]:
         """Bulk upsert. Returns (inserted, skipped_duplicates).
 
         Usa executemany pra eficiência (1 round-trip por batch). RETURNING id
         funciona com ON CONFLICT DO NOTHING — None nos pulos. Mas executemany
         não devolve rows facilmente; fazemos um loop com fetchrow pra contar
         com precisão.
+
+        sofa_event_id (Fase H A1.3): mesmo valor aplicado a todos os eventos
+        do batch (todos pertencem ao mesmo fixture). COALESCE preserva valor
+        existente em duplicates pra nao sobrescrever com NULL.
         """
         if not events:
             return 0, 0
@@ -62,8 +78,8 @@ class EventsHistoryRepo:
                         """
                         INSERT INTO events_history
                           (fixture_id, source, event_type, event_minute, event_second,
-                           team_side, player_name, props, raw)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)
+                           team_side, player_name, props, raw, sofa_event_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10)
                         ON CONFLICT (fixture_id, source, event_type, event_minute, team_side, player_name)
                           DO NOTHING
                         RETURNING id
@@ -73,6 +89,7 @@ class EventsHistoryRepo:
                         e.team_side, e.player_name,
                         json.dumps(e.props or {}, ensure_ascii=False),
                         json.dumps(e.raw or {}, ensure_ascii=False),
+                        sofa_event_id,
                     )
                     if row is not None:
                         inserted += 1

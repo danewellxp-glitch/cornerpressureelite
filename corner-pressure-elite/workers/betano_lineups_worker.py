@@ -24,6 +24,7 @@ import logging
 from typing import Optional, Protocol
 
 from data.lineups_provider import CanonicalLineup
+from data.repositories.af_sofa_map import AfSofaFixtureMapRepo
 from data.repositories.lineups_history import LineupsHistoryRepo
 
 log = logging.getLogger("cpes.workers.betano_lineups")
@@ -51,6 +52,7 @@ class BetanoLineupsWorker:
         provider: _LineupsSource,
         repo: LineupsHistoryRepo,
         max_minute: int = 5,
+        af_sofa_map: Optional[AfSofaFixtureMapRepo] = None,
     ):
         self._provider = provider
         self._repo = repo
@@ -58,6 +60,7 @@ class BetanoLineupsWorker:
         # Cache in-memory: fixtures já capturados nesta execução.
         # Reset em restart (repo.exists_for_fixture cobre o gap).
         self._captured: set[int] = set()
+        self._af_sofa_map = af_sofa_map
 
     async def capture_if_needed(
         self,
@@ -124,7 +127,17 @@ class BetanoLineupsWorker:
             return 0, 0
 
         try:
-            inserted, skipped = await self._repo.upsert_batch(lineups)
+            # Fase H A1.3: dual-write sofa_event_id se af_sofa_map injetado.
+            if self._af_sofa_map is not None:
+                try:
+                    sofa_event_id = await self._af_sofa_map.get_sofa_id(fixture_id)
+                except Exception as e:
+                    log.debug("betano_lineups_worker.af_sofa_lookup_error fixture=%d err=%s",
+                              fixture_id, e)
+                    sofa_event_id = None
+                inserted, skipped = await self._repo.upsert_batch(lineups, sofa_event_id=sofa_event_id)
+            else:
+                inserted, skipped = await self._repo.upsert_batch(lineups)
         except Exception as e:
             log.warning(
                 "betano_lineups_worker.persist_error fixture=%d sides=%d err=%s",

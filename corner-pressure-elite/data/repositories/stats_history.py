@@ -53,6 +53,8 @@ class StatsHistoryEntry:
     raw: Optional[dict] = None
     # K.1 PARTE B.7: lista de providers que enriqueceram o snapshot.
     enriched_by: Optional[list[str]] = None
+    # Fase H A1.3: dual-write sofa_event_id (None = unresolved)
+    sofa_event_id: Optional[int] = None
 
 
 class StatsHistoryRepo:
@@ -78,11 +80,11 @@ class StatsHistoryRepo:
                    version, provider_pressure,
                    corners_last_5min, corners_last_10min,
                    yellow_last_5min, yellow_last_10min,
-                   captured_at, raw, enriched_by)
+                   captured_at, raw, enriched_by, sofa_event_id)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
                         $13,$14,$15,$16,$17,$18,$19,$20,$21,$22,
                         $23,$24,$25,$26,
-                        COALESCE($27, NOW()), $28::jsonb, $29::jsonb)
+                        COALESCE($27, NOW()), $28::jsonb, $29::jsonb, $30)
                 ON CONFLICT (fixture_id, source, version)
                   WHERE version IS NOT NULL
                   DO NOTHING
@@ -104,6 +106,7 @@ class StatsHistoryRepo:
                 entry.captured_at,
                 json.dumps(entry.raw or {}, ensure_ascii=False),
                 json.dumps(entry.enriched_by) if entry.enriched_by else None,
+                entry.sofa_event_id,
             )
         return int(row["id"]) if row else None
 
