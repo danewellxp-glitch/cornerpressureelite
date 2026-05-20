@@ -78,6 +78,10 @@ LIGAS_MONITORADAS = [
 
     # América do Norte (Season 2026 - calendário MLS fev→dez)
     {"id": 253, "nome": "MLS", "pais": "USA", "media_esperada": 10.8, "season": 2026},
+
+    # CONMEBOL (Season 2026 - copas continentais sul-americanas, mata-mata fev→nov)
+    {"id": 13, "nome": "Copa Libertadores", "pais": "Conmebol", "media_esperada": 10.0, "season": 2026},
+    {"id": 11, "nome": "Copa Sul-Americana", "pais": "Conmebol", "media_esperada": 9.8, "season": 2026},
 ]
 
 LIGA_IDS = [liga["id"] for liga in LIGAS_MONITORADAS]
@@ -103,6 +107,13 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://cpes_user:cpes_password@l
 
 # --- Logging ---
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# --- Agenda / Fuso ---
+# Fuso usado pra montar a AGENDA DO DIA. A API-Football filtra `date` por dia
+# UTC quando não recebe `timezone` — isso cortava jogos noturnos sul-americanos
+# (Libertadores/Sudamericana 21:30+ BRT viram dia seguinte em UTC). Com este
+# timezone, o `date` passa a casar com o dia-calendário local. Ver BUGS.md 2026-05-20.
+SCHEDULE_TIMEZONE = os.getenv("SCHEDULE_TIMEZONE", "America/Sao_Paulo")
 
 # --- Resumo Diario ---
 DAILY_SUMMARY_TIME = os.getenv("DAILY_SUMMARY_TIME", "23:00")
@@ -166,6 +177,8 @@ LIGAS_MEDIA_CARTOES = {
     73: 4.6,   # Copa do Brasil (eliminatorias = mais tensao)
     128: 4.6,  # Liga Profesional Argentina
     253: 4.0,  # MLS
+    13: 5.0,   # Copa Libertadores (mata-mata continental = tensao alta)
+    11: 4.8,   # Copa Sul-Americana
 }
 
 

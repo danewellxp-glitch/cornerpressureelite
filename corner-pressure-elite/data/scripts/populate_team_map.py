@@ -54,6 +54,8 @@ TARGET_LEAGUES: list[tuple[int, int, str]] = [
     (253, 2025, "MLS"),
     (128, 2026, "Liga Argentina"),
     (72,  2026, "Brasileirão B"),
+    (13,  2026, "Copa Libertadores"),
+    (11,  2026, "Copa Sul-Americana"),
 ]
 
 CONFIDENCE_AUTO = 0.90  # ≥ vira approved automaticamente

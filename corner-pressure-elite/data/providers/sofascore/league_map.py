@@ -80,6 +80,18 @@ SOFASCORE_LEAGUE_MAP: dict[int, dict] = {
         "name": "Major League Soccer",
         "country": "US",
     },
+    13: {  # CONMEBOL Libertadores (masculina senior)
+        "unique_tournament_id": 384,
+        "season_id_current": 87760,
+        "name": "CONMEBOL Libertadores",
+        "country": "SA",
+    },
+    11: {  # CONMEBOL Sudamericana (masculina senior)
+        "unique_tournament_id": 480,
+        "season_id_current": 87770,
+        "name": "CONMEBOL Sudamericana",
+        "country": "SA",
+    },
     # Champions League (não-monitorada hoje, mas mapeada pra futuro)
     2: {
         "unique_tournament_id": 7,

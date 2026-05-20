@@ -209,6 +209,12 @@ class APIFootballClient:
         # Criar map de liga_id → season
         from config import LIGAS_MONITORADAS
         season_map = {liga["id"]: liga.get("season", 2025) for liga in LIGAS_MONITORADAS}
+
+        # Fuso local pro `date` casar com o dia-calendário (não UTC). Sem isso,
+        # jogos noturnos sul-americanos vazam pro dia seguinte. getattr defensivo
+        # pra rodar mesmo se config antigo (bind-mount) ainda não tiver a const.
+        import config as _cfg
+        schedule_tz = getattr(_cfg, "SCHEDULE_TIMEZONE", "America/Sao_Paulo")
         
         logger.info(f"[DEBUG] Ligas a filtrar: {league_ids} (total: {len(league_ids)})")
         logger.info(f"[DEBUG] Rate limiter status: {self.rate_limiter.remaining_daily()} reqs restantes")
@@ -223,7 +229,13 @@ class APIFootballClient:
             
             logger.info(f"[DEBUG] Requisitando liga {league_id} com season {season}")
             data = await self._request(
-                "fixtures", params={"date": date, "league": league_id, "season": season}
+                "fixtures",
+                params={
+                    "date": date,
+                    "league": league_id,
+                    "season": season,
+                    "timezone": schedule_tz,
+                },
             )
             fixtures = data.get("response", [])
             logger.info(f"[DEBUG] Liga {league_id}: {len(fixtures)} jogos retornados (season {season})")
