@@ -53,6 +53,7 @@ class BetanoLineupsWorker:
         repo: LineupsHistoryRepo,
         max_minute: int = 5,
         af_sofa_map: Optional[AfSofaFixtureMapRepo] = None,
+        event_resolver=None,
     ):
         self._provider = provider
         self._repo = repo
@@ -61,6 +62,8 @@ class BetanoLineupsWorker:
         # Reset em restart (repo.exists_for_fixture cobre o gap).
         self._captured: set[int] = set()
         self._af_sofa_map = af_sofa_map
+        # SofaScoreEventResolver — fallback live (ver betano_stats_worker).
+        self._event_resolver = event_resolver
 
     async def capture_if_needed(
         self,
@@ -133,7 +136,9 @@ class BetanoLineupsWorker:
             if self._af_sofa_map is not None:
                 if sofa_event_id is None:
                     try:
-                        sofa_event_id = await self._af_sofa_map.get_sofa_id(fixture_id)
+                        sofa_event_id = await self._af_sofa_map.get_or_resolve(
+                            fixture_id, resolver=self._event_resolver,
+                        )
                     except Exception as e:
                         log.debug("betano_lineups_worker.af_sofa_lookup_error fixture=%d err=%s",
                                   fixture_id, e)

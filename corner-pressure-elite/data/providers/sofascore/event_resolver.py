@@ -40,6 +40,7 @@ from rapidfuzz import fuzz
 from data.odds_provider import CanonicalFixture
 
 from .client import SofaScoreClient
+from .league_map import get_sofascore_ids
 
 log = logging.getLogger("cpes.providers.sofascore.event_resolver")
 
@@ -85,15 +86,66 @@ class SofaScoreEventResolver:
         # 2. Names canônicos via betano_fixture_map (se disponível).
         home_name, away_name = await self._resolve_names(fixture)
 
-        # 3. Fuzzy match em /events/live.
+        # 3. Fuzzy match em /events/live, restrito à competição esperada.
         sofa_id = await self._search_live(
             home_name, away_name, fixture.starts_at_utc,
+            expected_tid=self._expected_tid(fixture.league_id),
         )
 
         # 4. Cacheia outcome.
         ttl = _TTL_POS_SEC if sofa_id is not None else _TTL_NEG_SEC
         self._cache[fixture.fixture_id] = (sofa_id, now + ttl)
         return sofa_id
+
+    async def resolve_by_fixture_id(self, fixture_id: int) -> Optional[int]:
+        """Resolve `sofa_event_id` a partir só de `fixture_id`.
+
+        Pra workers bridge/AF que persistem por fixture_id e não têm um
+        `CanonicalFixture` completo. Puxa names canônicos + kickoff do
+        `fixture_map_repo` (betano_fixture_map) e faz o mesmo fuzzy match em
+        `/events/live`. Reusa o cache de `resolve()` (mesma chave fixture_id).
+        """
+        now = time.monotonic()
+        cached = self._cache.get(fixture_id)
+        if cached is not None:
+            sofa_id, expiry = cached
+            if now < expiry:
+                return sofa_id
+
+        if self._fixture_map_repo is None:
+            return None
+        try:
+            row = await self._fixture_map_repo.get_by_fixture_id(fixture_id)
+        except Exception as e:
+            log.debug(
+                "event_resolver.resolve_by_fixture_id.lookup_error fixture=%d err=%s",
+                fixture_id, e,
+            )
+            return None
+        if not row:
+            return None
+        home = row.get("home_team") if isinstance(row, dict) else getattr(row, "home_team", None)
+        away = row.get("away_team") if isinstance(row, dict) else getattr(row, "away_team", None)
+        kickoff = row.get("kickoff_utc") if isinstance(row, dict) else getattr(row, "kickoff_utc", None)
+        league_id = row.get("league_id") if isinstance(row, dict) else getattr(row, "league_id", None)
+        if not home or not away:
+            return None
+
+        sofa_id = await self._search_live(
+            home, away, kickoff, expected_tid=self._expected_tid(league_id),
+        )
+        ttl = _TTL_POS_SEC if sofa_id is not None else _TTL_NEG_SEC
+        self._cache[fixture_id] = (sofa_id, now + ttl)
+        return sofa_id
+
+    @staticmethod
+    def _expected_tid(league_id: Optional[int]) -> Optional[int]:
+        """unique_tournament_id SofaScore esperado pra liga AF, ou None se não
+        mapeada (degrada pra match sem filtro de competição)."""
+        if league_id is None:
+            return None
+        ids = get_sofascore_ids(league_id)
+        return ids[0] if ids else None
 
     async def _resolve_names(
         self, fixture: CanonicalFixture
@@ -123,6 +175,7 @@ class SofaScoreEventResolver:
         home_name: str,
         away_name: str,
         kickoff_at: Optional[datetime],
+        expected_tid: Optional[int] = None,
     ) -> Optional[int]:
         try:
             events = await self._client.get_live_events()
@@ -131,11 +184,18 @@ class SofaScoreEventResolver:
             return None
         if not events:
             return None
-        return _fuzzy_match(events, home_name, away_name, kickoff_at)
+        return _fuzzy_match(events, home_name, away_name, kickoff_at, expected_tid)
 
     def invalidate(self, fixture_id: int) -> None:
         """Remove cache pra um fixture (debug / após erro persistente)."""
         self._cache.pop(fixture_id, None)
+
+
+def _event_tid(ev: dict) -> Optional[int]:
+    """unique_tournament_id do evento SofaScore (ou None)."""
+    t = (ev.get("tournament") or {}).get("uniqueTournament") or {}
+    tid = t.get("id")
+    return tid if isinstance(tid, int) else None
 
 
 def _fuzzy_match(
@@ -143,8 +203,14 @@ def _fuzzy_match(
     home_name: str,
     away_name: str,
     kickoff_at: Optional[datetime],
+    expected_tid: Optional[int] = None,
 ) -> Optional[int]:
     """Fuzzy match com tie-breaker temporal. Aceita ≥85 combined score.
+
+    `expected_tid`: quando informado, descarta eventos de OUTRA competição
+    antes do fuzzy — mata falsos-positivos cross-competição (homônimos
+    feminino/sub-20/reserva ao vivo em outro torneio). Quando None (liga não
+    mapeada no SOFASCORE_LEAGUE_MAP), degrada pra match sem filtro.
 
     Quando 2+ candidates com delta < `_AMBIGUITY_DELTA`, escolhe maior
     (provavelmente correto) mas loga WARNING pra investigação.
@@ -155,6 +221,8 @@ def _fuzzy_match(
             continue
         ev_id = ev.get("id")
         if not isinstance(ev_id, int):
+            continue
+        if expected_tid is not None and _event_tid(ev) != expected_tid:
             continue
         ht = (ev.get("homeTeam") or {})
         at = (ev.get("awayTeam") or {})

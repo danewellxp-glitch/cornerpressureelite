@@ -47,6 +47,7 @@ class BetanoStatsWorker:
         calculator: StatsWindowCalculator,
         bootstrap_lookback_min: int = 20,
         af_sofa_map: Optional[AfSofaFixtureMapRepo] = None,
+        event_resolver=None,
     ):
         self._adapter = adapter
         self._repo = repo
@@ -54,6 +55,9 @@ class BetanoStatsWorker:
         self._bootstrap_lookback_min = bootstrap_lookback_min
         self._bootstrapped: set[int] = set()
         self._af_sofa_map = af_sofa_map
+        # SofaScoreEventResolver — fallback live quando af_sofa_map não tem o
+        # fixture (essencial pra dual-write nos snapshots bridge_betano).
+        self._event_resolver = event_resolver
 
     async def poll(self, fixture: CanonicalFixture) -> Optional[CanonicalStats]:
         """Roda 1 ciclo de captura+enrichment+persistência. Retorna `CanonicalStats`
@@ -113,7 +117,9 @@ class BetanoStatsWorker:
         if self._af_sofa_map is not None:
             if sofa_event_id is None:
                 try:
-                    sofa_event_id = await self._af_sofa_map.get_sofa_id(snapshot.fixture_id)
+                    sofa_event_id = await self._af_sofa_map.get_or_resolve(
+                        snapshot.fixture_id, resolver=self._event_resolver,
+                    )
                 except Exception as e:
                     log.debug("betano_stats_worker.af_sofa_lookup_error fixture=%d err=%s",
                               snapshot.fixture_id, e)

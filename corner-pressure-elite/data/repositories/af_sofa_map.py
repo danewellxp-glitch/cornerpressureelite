@@ -44,6 +44,32 @@ class AfSofaFixtureMapRepo:
             self._cache.popitem(last=False)
         return sofa_id
 
+    async def get_or_resolve(
+        self,
+        fixture_id: int,
+        *,
+        resolver=None,
+        mapped_via: str = "realtime_live",
+    ) -> Optional[int]:
+        """Lookup no banco; se NULL, cai pro resolver live e persiste o mapping.
+
+        É o passo descrito no docstring do módulo que faltava nos workers bridge
+        (Fase H A1.3 fix): sem o fallback, fixtures que só passam pelo
+        bridge_betano nunca entram no af_sofa_fixture_map e ficam com
+        sofa_event_id NULL pra sempre (chicken-and-egg).
+        """
+        sofa_id = await self.get_sofa_id(fixture_id)
+        if sofa_id is not None or resolver is None:
+            return sofa_id
+        try:
+            sofa_id = await resolver.resolve_by_fixture_id(fixture_id)
+        except Exception as e:
+            log.debug("af_sofa_map.resolve_error fixture=%d err=%s", fixture_id, e)
+            return None
+        if sofa_id is not None:
+            await self.upsert(fixture_id, sofa_id, mapped_via=mapped_via)
+        return sofa_id
+
     async def upsert(
         self,
         fixture_id: int,

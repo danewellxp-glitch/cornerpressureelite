@@ -20,6 +20,21 @@ class FixtureMapRepo:
             )
         return int(row["betano_event_id"]) if row else None
 
+    async def get_by_fixture_id(self, fixture_id: int) -> Optional[dict]:
+        """Linha completa do mapping (names canônicos Betano + kickoff + liga).
+
+        Usado pelo SofaScoreEventResolver pra resolver `sofa_event_id` a partir
+        só de `fixture_id` (workers bridge/AF que não têm CanonicalFixture). Sem
+        este método o resolver caía no `except` e perdia os names canônicos.
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT fixture_id, betano_event_id, home_team, away_team, "
+                "league_id, kickoff_utc FROM betano_fixture_map WHERE fixture_id=$1",
+                fixture_id,
+            )
+        return dict(row) if row else None
+
     async def upsert(
         self,
         fixture_id: int,

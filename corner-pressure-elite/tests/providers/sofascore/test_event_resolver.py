@@ -46,12 +46,15 @@ def _fix(fixture_id=42, home="Manchester United", away="Liverpool",
 
 
 def _live_event(id_=100, home="Manchester United", away="Liverpool",
-                 start_ts: int | None = None) -> dict:
+                 start_ts: int | None = None, tid: int = 17) -> dict:
+    # tid default 17 = Premier League (= league_id 39 de _fix no SOFASCORE_LEAGUE_MAP),
+    # pra resolve() passar o filtro de competição.
     return {
         "id": id_,
         "homeTeam": {"name": home},
         "awayTeam": {"name": away},
         "startTimestamp": start_ts,
+        "tournament": {"uniqueTournament": {"id": tid}},
     }
 
 
@@ -105,6 +108,30 @@ def test_fuzzy_match_ambiguous_warns(caplog):
         sid = _fuzzy_match(events, "Manchester United", "Liverpool", None)
     assert sid == 100  # aceita maior (exact match)
     assert any("ambiguous" in r.message for r in caplog.records)
+
+
+def test_fuzzy_match_filters_wrong_competition():
+    """expected_tid descarta evento de OUTRA competição (homônimo) antes do fuzzy."""
+    events = [
+        _live_event(100, "Flamengo", "Estudiantes", tid=999),   # competição errada
+        _live_event(200, "Flamengo", "Estudiantes", tid=384),   # CONMEBOL Libertadores
+    ]
+    sid = _fuzzy_match(events, "Flamengo", "Estudiantes", None, expected_tid=384)
+    assert sid == 200
+
+
+def test_fuzzy_match_rejects_right_names_wrong_competition():
+    """Nome bate mas só existe em competição errada → None (o FP que o filtro mata)."""
+    events = [_live_event(100, "Flamengo", "Estudiantes", tid=999)]
+    sid = _fuzzy_match(events, "Flamengo", "Estudiantes", None, expected_tid=384)
+    assert sid is None
+
+
+def test_fuzzy_match_no_filter_when_expected_tid_none():
+    """Liga não mapeada (expected_tid=None) → degrada pra match sem filtro."""
+    events = [_live_event(100, "Flamengo", "Estudiantes", tid=999)]
+    sid = _fuzzy_match(events, "Flamengo", "Estudiantes", None, expected_tid=None)
+    assert sid == 100
 
 
 @pytest.mark.asyncio
