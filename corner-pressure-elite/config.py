@@ -398,6 +398,14 @@ SOFASCORE_RATE_LIMIT_PER_SEC = int(os.getenv("SOFASCORE_RATE_LIMIT_PER_SEC", "10
 SOFASCORE_TIMEOUT_SEC = float(os.getenv("SOFASCORE_TIMEOUT_SEC", "15"))
 SOFASCORE_IMPERSONATE = os.getenv("SOFASCORE_IMPERSONATE", "chrome120")
 
+# Sprint N (2026-05-20) — achados do capture .mitm. Flags default OFF: o código
+# (ws_client.py, discovery.py) existe e está testado, mas só vira fonte do loop
+# quando o A2 fizer o cutover. Ver docs/sprints/2026-05-20-sprint-N-sofascore-realtime.md
+# WS NATS em tempo real (ws.sofascore.com:9222) — FT/placar/cartão push.
+SOFASCORE_WS_ENABLED = os.getenv("SOFASCORE_WS_ENABLED", "false").lower() == "true"
+# Discovery nativo via /unique-tournament/{tid}/scheduled-events/{date} (A2).
+SOFASCORE_DISCOVERY_ENABLED = os.getenv("SOFASCORE_DISCOVERY_ENABLED", "false").lower() == "true"
+
 # AF super-residual (após SofaScore estabilizar — manter 1-2 semanas pra
 # regredir rápido se SofaScore degradar). Cascade pós-K.1:
 #   Betano → SofaScore → AF (super-residual)

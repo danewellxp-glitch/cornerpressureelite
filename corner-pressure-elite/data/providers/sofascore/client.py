@@ -181,6 +181,21 @@ class SofaScoreClient:
         data = await self.get(f"/sport/football/scheduled-events/{date}")
         return data.get("events", []) if data else None
 
+    async def get_tournament_scheduled_events(
+        self, unique_tournament_id: int, date: str
+    ) -> Optional[list[dict]]:
+        """Eventos agendados de UM torneio numa data (Sprint N, 2026-05-20).
+
+        Endpoint `/unique-tournament/{tid}/scheduled-events/{date}`: traz só os
+        jogos daquele torneio (passado + futuro). Mais preciso e barato que o
+        global `/scheduled-events/{date}`, que devolve o mundo inteiro pra filtrar.
+        Base do discovery nativo SofaScore (A2) — itera os tids monitorados.
+        """
+        data = await self.get(
+            f"/unique-tournament/{unique_tournament_id}/scheduled-events/{date}"
+        )
+        return data.get("events", []) if data else None
+
     async def get_event(self, event_id: int) -> Optional[dict]:
         data = await self.get(f"/event/{event_id}")
         return data.get("event") if data else None
