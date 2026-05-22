@@ -621,8 +621,64 @@ class CornerPressureElite:
             else:
                 logger.info("Nenhum jogo programado para hoje nas ligas monitoradas")
                 await self._save_upcoming_games([])
+
+            # A2 shadow: compara cobertura discovery SofaScore vs AF (não muda
+            # o que é monitorado — só mede o que o cutover ganharia/perderia).
+            await self._shadow_discovery_compare(ligas_ativas, today)
         except Exception as e:
             logger.error(f"Erro ao buscar agenda: {e}")
+
+    async def _shadow_discovery_compare(self, ligas_ativas: List[int], today: str):
+        """Roda discovery SofaScore em paralelo ao AF e loga a cobertura (A2 shadow).
+
+        Atrás de SOFASCORE_DISCOVERY_ENABLED (default OFF). Totalmente guardado:
+        nunca interfere na agenda real. Gera o dado de validação do passo 4 do A2
+        (FP/cobertura) antes de flipar a chave pro discovery nativo.
+        """
+        if not getattr(config, "SOFASCORE_DISCOVERY_ENABLED", False):
+            return
+        if self.sofa_client is None:
+            return
+        try:
+            from data.providers.sofascore.discovery import (
+                compare_coverage,
+                discover_scheduled,
+            )
+
+            sofa_fixtures = await discover_scheduled(
+                self.sofa_client, ligas_ativas, today
+            )
+
+            af_norm: list[tuple[int, str, str]] = []
+            for f in (self._today_schedule or []):
+                lid = (f.get("league") or {}).get("id")
+                teams = f.get("teams") or {}
+                home = (teams.get("home") or {}).get("name")
+                away = (teams.get("away") or {}).get("name")
+                if lid and home and away:
+                    af_norm.append((int(lid), home, away))
+
+            report = compare_coverage(af_norm, sofa_fixtures)
+            logger.info(
+                "[A2-SHADOW] discovery vs AF: af=%d sofa=%d matched=%d "
+                "(%.0f%% do AF) af_only=%d sofa_only=%d",
+                report.af_total, report.sofa_total, report.matched,
+                report.af_match_pct, len(report.af_only), len(report.sofa_only),
+            )
+            for (lid, h, a) in report.af_only[:15]:
+                logger.warning(
+                    "[A2-SHADOW] AF-only (cutover PERDERIA): liga=%d %s vs %s",
+                    lid, h, a,
+                )
+            for sf in report.sofa_only[:15]:
+                logger.info(
+                    "[A2-SHADOW] Sofa-only (cutover GANHARIA): liga=%d sofa=%d "
+                    "%s vs %s status=%s",
+                    sf.af_league_id, sf.sofa_event_id,
+                    sf.home_team, sf.away_team, sf.status_type,
+                )
+        except Exception as e:
+            logger.warning("[A2-SHADOW] comparação falhou (ignorado): %s", e)
     
     async def _save_upcoming_games(self, games: List[Dict] = None):
         """Salva próximos jogos no postgres para dashboard."""

@@ -16,9 +16,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
+from rapidfuzz import fuzz
+
 from .league_map import get_sofascore_ids
 
 log = logging.getLogger("cpes.providers.sofascore.discovery")
+
+# Mesmo threshold do SofaScoreEventResolver (fuzzy ratio médio home+away).
+_MATCH_THRESHOLD = 85.0
 
 # status.type do SofaScore que contam como "monitorável" (futuro/ao vivo).
 _OPEN_STATUS = {"notstarted", "inprogress"}
@@ -96,3 +101,70 @@ async def discover_scheduled(
     log.info("discovery.scheduled date=%s ligas=%d fixtures=%d (only_open=%s)",
              date, len(af_league_ids), len(out), only_open)
     return out
+
+
+@dataclass(frozen=True)
+class CoverageReport:
+    """Comparação shadow entre a agenda AF (atual) e a agenda SofaScore (futura).
+
+    Mede o que o cutover A2 ganharia/perderia se trocasse a fonte do discovery:
+      - `af_only`: jogos que o AF vê e o SofaScore NÃO → o cutover PERDERIA.
+      - `sofa_only`: jogos que só o SofaScore vê → o cutover GANHARIA (ou ruído).
+    """
+    af_total: int
+    sofa_total: int
+    matched: int
+    af_only: list[tuple[int, str, str]]   # (af_league_id, home, away) sem par Sofa
+    sofa_only: list[SofaFixture]          # Sofa sem par AF
+
+    @property
+    def af_match_pct(self) -> float:
+        return 100.0 * self.matched / self.af_total if self.af_total else 0.0
+
+
+def compare_coverage(
+    af_fixtures: list[tuple[int, str, str]],
+    sofa_fixtures: list[SofaFixture],
+    *,
+    threshold: float = _MATCH_THRESHOLD,
+) -> CoverageReport:
+    """Casa a agenda AF com a agenda SofaScore (puro in-memory, zero I/O).
+
+    `af_fixtures`: tuplas `(af_league_id, home_team, away_team)`.
+    Match = fuzzy ratio médio (home+away) ≥ `threshold`, restrito à MESMA liga
+    (mesma regra do `SofaScoreEventResolver`). Cada Sofa fixture casa com no
+    máximo um AF (consumido), pra `sofa_only` ficar exato.
+    """
+    by_league: dict[int, list[SofaFixture]] = {}
+    for sf in sofa_fixtures:
+        by_league.setdefault(sf.af_league_id, []).append(sf)
+
+    consumed: set[int] = set()
+    matched = 0
+    af_only: list[tuple[int, str, str]] = []
+
+    for (lid, home, away) in af_fixtures:
+        best_score = -1.0
+        best_sf: Optional[SofaFixture] = None
+        for sf in by_league.get(lid, []):
+            if sf.sofa_event_id in consumed:
+                continue
+            score = (fuzz.ratio(home, sf.home_team)
+                     + fuzz.ratio(away, sf.away_team)) / 2
+            if score > best_score:
+                best_score = score
+                best_sf = sf
+        if best_sf is not None and best_score >= threshold:
+            consumed.add(best_sf.sofa_event_id)
+            matched += 1
+        else:
+            af_only.append((lid, home, away))
+
+    sofa_only = [sf for sf in sofa_fixtures if sf.sofa_event_id not in consumed]
+    return CoverageReport(
+        af_total=len(af_fixtures),
+        sofa_total=len(sofa_fixtures),
+        matched=matched,
+        af_only=af_only,
+        sofa_only=sofa_only,
+    )
