@@ -46,3 +46,13 @@ mitmweb-*.log
 har_export_*.json
 betano-capture-*.json
 sofa-*.har
+
+# Scratch local (screenshots, capturas, dumps) — não versionar
+/Screenshot_*.png
+/WhatsApp Image*.jpeg
+/*.har
+/sofascoreeee.json
+/upload-lovable-dashboard/
+
+# MCP config local (contém credencial RO do Postgres no docker network)
+/.mcp.json
