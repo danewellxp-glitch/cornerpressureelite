@@ -246,23 +246,25 @@ export default function PerformancePage() {
                                 <AreaChart data={roiChart} margin={{ left: -10, right: 8, top: 5, bottom: 0 }}>
                                     <defs>
                                         <linearGradient id="perfGrad" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stopColor="oklch(0.62 0.22 255)" stopOpacity={0.4} />
-                                            <stop offset="100%" stopColor="oklch(0.62 0.22 255)" stopOpacity={0} />
+                                            <stop offset="0%" stopColor="#34d399" stopOpacity={0.4} />
+                                            <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
                                         </linearGradient>
                                     </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.30 0.03 220 / 0.3)" />
-                                    <XAxis dataKey="n" stroke="oklch(0.70 0.02 200)" tick={{ fontSize: 10, fontFamily: "JetBrains Mono" }} />
-                                    <YAxis stroke="oklch(0.70 0.02 200)" tick={{ fontSize: 10, fontFamily: "JetBrains Mono" }} />
+                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                                    <XAxis dataKey="n" stroke="#8b93a3" tick={{ fontSize: 10, fontFamily: "JetBrains Mono" }} />
+                                    <YAxis stroke="#8b93a3" tick={{ fontSize: 10, fontFamily: "JetBrains Mono" }} />
                                     <RTooltip
                                         contentStyle={{
-                                            background: "oklch(0.20 0.028 232)",
-                                            border: "1px solid oklch(0.62 0.22 255 / 0.4)",
+                                            background: "#2a2a2a",
+                                            border: "1px solid rgba(52,211,153,0.35)",
                                             borderRadius: 12,
                                             fontSize: 12,
                                             fontFamily: "JetBrains Mono",
+                                            color: "#e5e7eb",
+                                            boxShadow: "0 6px 20px rgba(0,0,0,0.5)",
                                         }}
                                     />
-                                    <Area type="monotone" dataKey="roi" stroke="oklch(0.74 0.18 235)" strokeWidth={2} fill="url(#perfGrad)" />
+                                    <Area type="monotone" dataKey="roi" stroke="#34d399" strokeWidth={2} fill="url(#perfGrad)" />
                                 </AreaChart>
                             </ResponsiveContainer>
                         ) : (
@@ -282,20 +284,22 @@ export default function PerformancePage() {
                         {perLiga.length > 0 ? (
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={perLiga} margin={{ left: -10, right: 8, top: 5, bottom: 0 }}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.30 0.03 220 / 0.3)" />
-                                    <XAxis dataKey="liga" stroke="oklch(0.70 0.02 200)" tick={{ fontSize: 9, fontFamily: "JetBrains Mono" }} angle={-30} textAnchor="end" interval={0} height={70} />
-                                    <YAxis stroke="oklch(0.70 0.02 200)" tick={{ fontSize: 10, fontFamily: "JetBrains Mono" }} domain={[0, 100]} />
+                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
+                                    <XAxis dataKey="liga" stroke="#8b93a3" tick={{ fontSize: 9, fontFamily: "JetBrains Mono" }} angle={-30} textAnchor="end" interval={0} height={70} />
+                                    <YAxis stroke="#8b93a3" tick={{ fontSize: 10, fontFamily: "JetBrains Mono" }} domain={[0, 100]} />
                                     <RTooltip
                                         contentStyle={{
-                                            background: "oklch(0.20 0.028 232)",
-                                            border: "1px solid oklch(0.62 0.22 255 / 0.4)",
+                                            background: "#2a2a2a",
+                                            border: "1px solid rgba(52,211,153,0.35)",
                                             borderRadius: 12,
                                             fontSize: 12,
                                             fontFamily: "JetBrains Mono",
+                                            color: "#e5e7eb",
+                                            boxShadow: "0 6px 20px rgba(0,0,0,0.5)",
                                         }}
                                         formatter={(v) => [`${v}%`, "Win Rate"]}
                                     />
-                                    <Bar dataKey="winrate" fill="oklch(0.62 0.22 255)" radius={[6, 6, 0, 0]} />
+                                    <Bar dataKey="winrate" fill="#34d399" radius={[6, 6, 0, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
                         ) : (

@@ -62,7 +62,7 @@ export default function HeroEmpty({ userName, initialConfig }: Props) {
                     mb: 3,
                 }}
             >
-                <SmartToy sx={{ fontSize: 56, color: "#9C6DFF" }} />
+                <SmartToy sx={{ fontSize: 56, color: "#7C4DFF" }} />
             </Box>
 
             <Typography
@@ -72,7 +72,7 @@ export default function HeroEmpty({ userName, initialConfig }: Props) {
                 transition={{ duration: 0.4, delay: 0.1 }}
                 variant="h4"
                 fontWeight={800}
-                sx={{ mb: 1, color: "#fff" }}
+                sx={{ mb: 1, color: "#1F1B16" }}
             >
                 Bem-vindo ao Robô, {firstName}!
             </Typography>
@@ -82,7 +82,7 @@ export default function HeroEmpty({ userName, initialConfig }: Props) {
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, delay: 0.15 }}
-                sx={{ color: "rgba(255,255,255,0.7)", maxWidth: 520, mb: 4, lineHeight: 1.6 }}
+                sx={{ color: "#5C594F", maxWidth: 520, mb: 4, lineHeight: 1.6 }}
             >
                 Os sinais do PressureIQ chegam direto na casa de aposta. O robô executa,
                 gerencia a banca e fecha apostas quando faz sentido matematicamente.
@@ -106,14 +106,14 @@ export default function HeroEmpty({ userName, initialConfig }: Props) {
                         transition={{ duration: 0.35, delay: 0.2 + i * 0.08 }}
                         sx={{
                             p: 2,
-                            background: "rgba(255,255,255,0.03)",
-                            border: "1px solid rgba(124,77,255,0.15)",
+                            background: "rgba(124,77,255,0.05)",
+                            border: "1px solid rgba(124,77,255,0.18)",
                             borderRadius: 2,
                             textAlign: "left",
                         }}
                     >
                         <Box sx={{ fontSize: 24, mb: 0.5 }}>{s.icon}</Box>
-                        <Typography variant="body2" fontWeight={700} sx={{ color: "#fff", mb: 0.5 }}>
+                        <Typography variant="body2" fontWeight={700} sx={{ color: "#1F1B16", mb: 0.5 }}>
                             {s.title}
                         </Typography>
                         <Typography variant="caption" sx={{ color: "text.secondary" }}>
@@ -148,7 +148,7 @@ export default function HeroEmpty({ userName, initialConfig }: Props) {
                 Começar configuração
             </Button>
 
-            <Typography variant="caption" sx={{ mt: 3, color: "rgba(255,255,255,0.4)" }}>
+            <Typography variant="caption" sx={{ mt: 3, color: "#9A958A" }}>
                 ⚠️ Apostas envolvem risco real. Leia os termos antes.
             </Typography>
 

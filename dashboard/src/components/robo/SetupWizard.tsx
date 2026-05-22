@@ -52,9 +52,9 @@ const BANCA_PRESETS = [
 ];
 
 const HOUSES = [
-    { id: "betano", label: "Betano", color: "#FF6B00" },
+    { id: "betano", label: "Betano", color: "#D9560A" },
     { id: "bet365", label: "Bet365", color: "#0a6e0a" },
-    { id: "kto", label: "KTO", color: "#FFD700" },
+    { id: "kto", label: "KTO", color: "#B8860B" },
 ];
 
 export default function SetupWizard({ open, onClose, initialConfig }: Props) {
@@ -195,7 +195,7 @@ export default function SetupWizard({ open, onClose, initialConfig }: Props) {
             slotProps={{
                 paper: {
                     sx: {
-                        background: "linear-gradient(180deg, #0d1b2a 0%, #0a1628 100%)",
+                        background: "linear-gradient(180deg, #FFFFFF 0%, #FAF7F0 100%)",
                         border: "1px solid rgba(124,77,255,0.3)",
                         borderRadius: { xs: 0, sm: 3 },
                     },
@@ -230,10 +230,10 @@ export default function SetupWizard({ open, onClose, initialConfig }: Props) {
                             {step === 0 && (
                                 <StepContent
                                     title="Termos de uso do Robô"
-                                    color="#FFC107"
-                                    icon={<Gavel sx={{ fontSize: 40, color: "#FFC107" }} />}
+                                    color="#B45309"
+                                    icon={<Gavel sx={{ fontSize: 40, color: "#B45309" }} />}
                                 >
-                                    <Typography variant="body2" sx={{ color: "text.secondary", textAlign: "left", maxHeight: 200, overflowY: "auto", p: 2, background: "rgba(0,0,0,0.2)", borderRadius: 1, mb: 2 }}>
+                                    <Typography variant="body2" sx={{ color: "text.secondary", textAlign: "left", maxHeight: 200, overflowY: "auto", p: 2, background: "rgba(31,27,22,0.05)", borderRadius: 1, mb: 2 }}>
                                         <strong>Riscos:</strong> apostas envolvem perda financeira real. A casa de aposta pode proibir uso de automação em seus termos de serviço — o uso do Robô pode resultar em banimento da sua conta e retenção/refund forçado das apostas. Você assume integralmente esse risco.
                                         <br /><br />
                                         <strong>Responsabilidade:</strong> a PressureIQ não garante lucros, não controla as casas de aposta nem os resultados dos jogos. Nossas responsabilidade limita-se ao funcionamento técnico do software.
@@ -247,7 +247,7 @@ export default function SetupWizard({ open, onClose, initialConfig }: Props) {
                                             <Checkbox
                                                 checked={tosAccepted}
                                                 onChange={(e) => setTosAccepted(e.target.checked)}
-                                                sx={{ color: "#FFC107", "&.Mui-checked": { color: "#FFC107" } }}
+                                                sx={{ color: "#B45309", "&.Mui-checked": { color: "#B45309" } }}
                                             />
                                         }
                                         label={<Typography variant="body2">Li e concordo com os termos acima.</Typography>}
@@ -257,8 +257,8 @@ export default function SetupWizard({ open, onClose, initialConfig }: Props) {
                             {step === 1 && (
                                 <StepContent
                                     title="Conecte sua casa de aposta"
-                                    color="#00B0FF"
-                                    icon={<Casino sx={{ fontSize: 40, color: "#00B0FF" }} />}
+                                    color="#0277BD"
+                                    icon={<Casino sx={{ fontSize: 40, color: "#0277BD" }} />}
                                 >
                                     <Typography variant="caption" sx={{ display: "block", color: "text.secondary", mb: 2 }}>
                                         Suas credenciais são <strong>cifradas</strong> antes de gravadas. Nunca expostas pela API.
@@ -272,7 +272,7 @@ export default function SetupWizard({ open, onClose, initialConfig }: Props) {
                                                 clickable
                                                 sx={{
                                                     fontWeight: 700,
-                                                    borderColor: house === h.id ? h.color : "rgba(255,255,255,0.2)",
+                                                    borderColor: house === h.id ? h.color : "rgba(31,27,22,0.2)",
                                                     color: house === h.id ? h.color : "text.secondary",
                                                     border: "1px solid",
                                                     bgcolor: house === h.id ? `${h.color}20` : "transparent",
@@ -301,8 +301,8 @@ export default function SetupWizard({ open, onClose, initialConfig }: Props) {
                             {step === 2 && (
                                 <StepContent
                                     title="Defina sua banca virtual"
-                                    color="#00E676"
-                                    icon={<AttachMoney sx={{ fontSize: 40, color: "#00E676" }} />}
+                                    color="#15A34A"
+                                    icon={<AttachMoney sx={{ fontSize: 40, color: "#15A34A" }} />}
                                 >
                                     <Typography variant="caption" sx={{ display: "block", color: "text.secondary", mb: 2 }}>
                                         Quanto o robô vai usar como referência de 100% da sua banca. Saldo real na casa pode ser maior — o robô ignora.
@@ -316,10 +316,10 @@ export default function SetupWizard({ open, onClose, initialConfig }: Props) {
                                                 onClick={() => setBancaCents(p.cents)}
                                                 sx={{
                                                     fontWeight: 700,
-                                                    bgcolor: bancaCents === p.cents ? "rgba(0,230,118,0.2)" : "transparent",
-                                                    color: bancaCents === p.cents ? "#00E676" : "text.secondary",
+                                                    bgcolor: bancaCents === p.cents ? "rgba(21,163,74,0.14)" : "transparent",
+                                                    color: bancaCents === p.cents ? "#15A34A" : "text.secondary",
                                                     border: "1px solid",
-                                                    borderColor: bancaCents === p.cents ? "#00E676" : "rgba(255,255,255,0.15)",
+                                                    borderColor: bancaCents === p.cents ? "#15A34A" : "rgba(31,27,22,0.15)",
                                                 }}
                                             />
                                         ))}
@@ -331,9 +331,9 @@ export default function SetupWizard({ open, onClose, initialConfig }: Props) {
                                         step={50}
                                         marks={[{ value: 50, label: "R$50" }, { value: 1000, label: "R$1k" }, { value: 5000, label: "R$5k" }]}
                                         onChange={(_, v) => setBancaCents((v as number) * 100)}
-                                        sx={{ color: "#00E676", mb: 2 }}
+                                        sx={{ color: "#15A34A", mb: 2 }}
                                     />
-                                    <Typography variant="h4" sx={{ textAlign: "center", color: "#00E676", fontWeight: 800 }}>
+                                    <Typography variant="h4" sx={{ textAlign: "center", color: "#15A34A", fontWeight: 800 }}>
                                         R$ {(bancaCents / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
                                     </Typography>
                                 </StepContent>
@@ -341,11 +341,11 @@ export default function SetupWizard({ open, onClose, initialConfig }: Props) {
                             {step === 3 && (
                                 <StepContent
                                     title="Tudo pronto!"
-                                    color="#00E676"
-                                    icon={<CheckCircle sx={{ fontSize: 40, color: "#00E676" }} />}
+                                    color="#15A34A"
+                                    icon={<CheckCircle sx={{ fontSize: 40, color: "#15A34A" }} />}
                                 >
                                     <Typography variant="body2" sx={{ color: "text.secondary", textAlign: "center", mb: 2 }}>
-                                        O robô vai iniciar em <strong style={{ color: "#00B0FF" }}>modo paper trading</strong> — simulando apostas com base nos sinais reais. Nenhum centavo é gasto.
+                                        O robô vai iniciar em <strong style={{ color: "#0277BD" }}>modo paper trading</strong> — simulando apostas com base nos sinais reais. Nenhum centavo é gasto.
                                     </Typography>
                                     <Box sx={{ p: 2, background: "rgba(0,176,255,0.06)", border: "1px solid rgba(0,176,255,0.2)", borderRadius: 2, mb: 2 }}>
                                         <Typography variant="caption" sx={{ display: "block", color: "text.secondary", mb: 1 }}>
@@ -456,7 +456,7 @@ function StepContent({
             >
                 {icon}
             </Box>
-            <Typography variant="h6" fontWeight={700} sx={{ color: "#fff", mb: 2 }}>
+            <Typography variant="h6" fontWeight={700} sx={{ color: "#1F1B16", mb: 2 }}>
                 {title}
             </Typography>
             {children}

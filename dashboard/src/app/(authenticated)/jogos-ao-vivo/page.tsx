@@ -67,7 +67,7 @@ export default function JogosAoVivoPage() {
                                 accent="mint"
                                 count={naJanela.length}
                             >
-                                <div className="space-y-2">
+                                <div className="space-y-3">
                                     {naJanela.map((g, i) => (
                                         <FocusRow key={g.id} game={g} index={i} />
                                     ))}
@@ -84,7 +84,7 @@ export default function JogosAoVivoPage() {
                                 accent="warning"
                                 count={preJanela.length}
                             >
-                                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                                <div className="space-y-3">
                                     {preJanela.map((g, i) => (
                                         <CompactRow key={g.id} game={g} index={i} />
                                     ))}
@@ -266,53 +266,138 @@ function Lane({
  *  FocusRow — partida em analise ativa (linha cheia, big numbers)
  * ════════════════════════════════════════════════════════════════ */
 
-function FocusRow({ game, index }: { game: LiveGame; index: number }) {
+type RowVariant = "live" | "watch" | "done";
+
+const ROW_VARIANT: Record<
+    RowVariant,
+    {
+        label: string;
+        dot: string;
+        tag: string;
+        bar: string;
+        accent: string;
+        score: string;
+        minute: string;
+        hover: string;
+    }
+> = {
+    live: {
+        label: "ao vivo",
+        dot: "bg-mint animate-pulse shadow-[0_0_8px_oklch(0.62_0.22_255)]",
+        tag: "text-mint",
+        bar: "from-mint/0 via-mint to-mint/0",
+        accent: "from-mint via-mint to-mint/20",
+        score: "text-mint-bright",
+        minute: "text-foreground",
+        hover: "hover:border-mint/45 hover:ring-mint/20",
+    },
+    watch: {
+        label: "aguarda",
+        dot: "bg-warning shadow-[0_0_6px_oklch(0.8_0.16_75)]",
+        tag: "text-warning",
+        bar: "from-warning/0 via-warning/70 to-warning/0",
+        accent: "from-warning via-warning/80 to-warning/15",
+        score: "text-foreground/90",
+        minute: "text-muted-foreground",
+        hover: "hover:border-warning/40 hover:ring-warning/15",
+    },
+    done: {
+        label: "encerrado",
+        dot: "bg-muted-foreground",
+        tag: "text-muted-foreground",
+        bar: "from-transparent via-border to-transparent",
+        accent: "from-border via-border to-transparent",
+        score: "text-foreground/65",
+        minute: "text-muted-foreground/60",
+        hover: "hover:border-border hover:ring-white/10",
+    },
+};
+
+function FocusRow({
+    game,
+    index,
+    variant = "live",
+}: {
+    game: LiveGame;
+    index: number;
+    variant?: RowVariant;
+}) {
     const minuto = Math.max(0, game.minuto ?? 0);
-    const minutoCapped = Math.min(minuto, 90);
-    const minutoPct = (minutoCapped / 90) * 100;
-    const inJanela = minuto >= 50 && minuto <= 90;
+    const minutoPct = Math.min((minuto / 90) * 100, 100);
+    const v = ROW_VARIANT[variant];
 
     return (
         <article
-            className="piq-in relative border border-border bg-card/80 hover:border-mint/50 hover:bg-card transition-colors"
-            style={{ animationDelay: `${index * 40}ms` }}
+            className={cn(
+                "piq-in group relative overflow-hidden rounded-xl border border-border/70",
+                "bg-gradient-to-br from-card/95 via-card/70 to-card/45",
+                "ring-1 ring-inset ring-white/[0.03]",
+                "shadow-[inset_0_1px_0_oklch(1_0_0/0.05),0_12px_32px_-20px_oklch(0_0_0/0.8)]",
+                "transition-all duration-300 hover:-translate-y-px",
+                v.hover,
+            )}
+            style={{ animationDelay: `${index * 35}ms` }}
         >
-            {/* progress bar top */}
-            <div className="absolute top-0 inset-x-0 h-[2px] bg-border/40 overflow-hidden">
-                <div
-                    className={cn(
-                        "h-full transition-[width] duration-700 ease-out",
-                        inJanela ? "bg-mint shadow-[0_0_8px_oklch(0.62_0.22_255)]" : "bg-warning",
-                    )}
-                    style={{ width: `${minutoPct}%` }}
-                />
-            </div>
+            {/* left accent bar */}
+            <span
+                className={cn("absolute left-0 inset-y-0 w-[3px] bg-gradient-to-b", v.accent)}
+                aria-hidden
+            />
+            {/* top progress */}
+            {variant !== "done" && (
+                <span className="absolute top-0 inset-x-0 h-px overflow-hidden" aria-hidden>
+                    <span
+                        className={cn("block h-full bg-gradient-to-r transition-[width] duration-700 ease-out", v.bar)}
+                        style={{ width: `${minutoPct}%` }}
+                    />
+                </span>
+            )}
 
-            <div className="grid grid-cols-12 items-center gap-3 sm:gap-5 px-4 sm:px-5 py-4 sm:py-5">
-                {/* minute + live tag */}
+            <div className="grid grid-cols-12 items-center gap-3 sm:gap-5 pl-5 pr-4 sm:pr-5 py-4">
+                {/* status + minute */}
                 <div className="col-span-4 sm:col-span-2">
-                    <div className="flex items-center gap-1.5">
-                        <span className="size-1.5 rounded-full bg-mint animate-pulse shadow-[0_0_6px_oklch(0.62_0.22_255)]" />
-                        <span className="font-mono text-[9px] tracking-[0.22em] uppercase text-mint">
-                            live
-                        </span>
-                    </div>
-                    <div className="font-mono text-3xl sm:text-[2.5rem] font-bold tabular leading-none mt-1.5">
-                        {minuto}
-                        <span className="text-xs text-muted-foreground align-top ml-0.5">'</span>
+                    <span
+                        className={cn(
+                            "inline-flex items-center gap-1.5 font-mono text-[9px] tracking-[0.22em] uppercase",
+                            v.tag,
+                        )}
+                    >
+                        <span className={cn("size-1.5 rounded-full", v.dot)} />
+                        {v.label}
+                    </span>
+                    <div
+                        className={cn(
+                            "font-mono text-[2.1rem] sm:text-[2.6rem] font-bold tabular leading-none mt-1.5",
+                            v.minute,
+                        )}
+                    >
+                        {variant === "done" ? (
+                            <span className="text-2xl sm:text-3xl">FT</span>
+                        ) : (
+                            <>
+                                {minuto}
+                                <span className="text-sm text-muted-foreground align-top ml-0.5">&apos;</span>
+                            </>
+                        )}
                     </div>
                 </div>
 
-                {/* teams + score */}
-                <div className="col-span-8 sm:col-span-7">
-                    <div className="font-mono text-[9px] tracking-[0.22em] uppercase text-muted-foreground truncate mb-2">
+                {/* league + teams + score */}
+                <div className="col-span-8 sm:col-span-7 min-w-0">
+                    <div className="font-mono text-[9px] tracking-[0.22em] uppercase text-muted-foreground/70 truncate mb-2.5">
                         {game.liga}
                     </div>
                     <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-4">
                         <div className="font-display text-sm sm:text-lg font-semibold leading-tight truncate text-right">
                             {game.home}
                         </div>
-                        <div className="font-display text-2xl sm:text-[1.75rem] font-bold tabular text-mint-bright text-center px-2 sm:px-4 border-x border-mint/25">
+                        <div
+                            className={cn(
+                                "font-mono text-xl sm:text-2xl font-bold tabular text-center rounded-lg px-3 sm:px-4 py-1",
+                                "bg-background/50 border border-border/60 shadow-[inset_0_1px_2px_oklch(0_0_0/0.4)]",
+                                v.score,
+                            )}
+                        >
                             {game.placar}
                         </div>
                         <div className="font-display text-sm sm:text-lg font-semibold leading-tight truncate">
@@ -322,14 +407,14 @@ function FocusRow({ game, index }: { game: LiveGame; index: number }) {
                 </div>
 
                 {/* stats */}
-                <div className="col-span-12 sm:col-span-3 flex items-end justify-around sm:justify-end gap-5 sm:gap-6 sm:border-l sm:border-border sm:pl-5 pt-2 sm:pt-0 border-t sm:border-t-0 border-border/40 mt-1 sm:mt-0">
-                    <StatBlock
+                <div className="col-span-12 sm:col-span-3 flex items-center justify-around sm:justify-end gap-2.5 sm:gap-3 pt-3 sm:pt-0 mt-1 sm:mt-0 border-t sm:border-t-0 border-border/40">
+                    <StatChip
                         icon={<Flag className="size-3" aria-hidden />}
                         label="esc"
                         value={game.escanteios ?? 0}
                         accent="mint"
                     />
-                    <StatBlock
+                    <StatChip
                         icon={<Square className="size-3" aria-hidden />}
                         label="crd"
                         value={game.cartoes ?? 0}
@@ -341,7 +426,7 @@ function FocusRow({ game, index }: { game: LiveGame; index: number }) {
     );
 }
 
-function StatBlock({
+function StatChip({
     icon,
     label,
     value,
@@ -353,19 +438,18 @@ function StatBlock({
     accent: "mint" | "warning";
 }) {
     return (
-        <div className="flex flex-col items-center gap-1">
-            <div
+        <div className="flex flex-col items-center gap-1 rounded-lg border border-border/50 bg-background/30 px-3 py-1.5 min-w-[58px]">
+            <span
                 className={cn(
-                    "font-mono text-[9px] tracking-[0.22em] uppercase inline-flex items-center gap-1",
-                    accent === "mint" && "text-mint",
-                    accent === "warning" && "text-warning",
+                    "font-mono text-[9px] tracking-[0.18em] uppercase inline-flex items-center gap-1",
+                    accent === "mint" ? "text-mint" : "text-warning",
                 )}
             >
                 {icon} {label}
-            </div>
-            <div className="font-mono text-xl sm:text-2xl font-bold tabular leading-none">
+            </span>
+            <span className="font-mono text-lg sm:text-xl font-bold tabular leading-none text-foreground">
                 {String(value).padStart(2, "0")}
-            </div>
+            </span>
         </div>
     );
 }
@@ -375,42 +459,7 @@ function StatBlock({
  * ════════════════════════════════════════════════════════════════ */
 
 function CompactRow({ game, index }: { game: LiveGame; index: number }) {
-    return (
-        <article
-            className="piq-in border border-border/60 bg-card/40 hover:bg-card/80 hover:border-warning/40 transition-colors p-4"
-            style={{ animationDelay: `${index * 25}ms` }}
-        >
-            <div className="flex items-center justify-between mb-2 font-mono text-[9px] tracking-[0.2em] uppercase">
-                <span className="inline-flex items-center gap-1.5 text-warning">
-                    <span className="size-1 rounded-full bg-warning" />
-                    wait
-                </span>
-                <span className="tabular text-muted-foreground">{game.minuto}'</span>
-            </div>
-            <div className="font-mono text-[9px] tracking-[0.2em] uppercase text-muted-foreground truncate mb-2">
-                {game.liga}
-            </div>
-
-            <div className="space-y-1">
-                <div className="text-sm font-medium leading-tight truncate">{game.home}</div>
-                <div className="font-display text-xl font-bold tabular leading-none">
-                    {game.placar}
-                </div>
-                <div className="text-sm font-medium leading-tight truncate">{game.away}</div>
-            </div>
-
-            <div className="flex items-center gap-4 mt-3 pt-3 border-t border-border/50 font-mono text-[10px] tabular text-muted-foreground">
-                <span className="inline-flex items-center gap-1">
-                    <Flag className="size-3" aria-hidden />
-                    {game.escanteios ?? 0}
-                </span>
-                <span className="inline-flex items-center gap-1">
-                    <Square className="size-3" aria-hidden />
-                    {game.cartoes ?? 0}
-                </span>
-            </div>
-        </article>
-    );
+    return <FocusRow game={game} index={index} variant="watch" />;
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -468,7 +517,7 @@ function CollapsibleLane({
             </button>
 
             {open && (
-                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="space-y-3">
                     {games.map((g, i) => (
                         <FinishedRow key={g.id} game={g} index={i} />
                     ))}
@@ -479,37 +528,7 @@ function CollapsibleLane({
 }
 
 function FinishedRow({ game, index }: { game: LiveGame; index: number }) {
-    return (
-        <article
-            className="piq-in border border-border/40 bg-card/20 px-4 py-3"
-            style={{ animationDelay: `${index * 18}ms` }}
-        >
-            <div className="flex items-center justify-between mb-2 font-mono text-[9px] tracking-[0.2em] uppercase">
-                <span className="text-muted-foreground">fim · {game.minuto}'</span>
-                <span className="tabular text-muted-foreground inline-flex items-center gap-1.5">
-                    <Flag className="size-3" aria-hidden /> {game.escanteios ?? 0}
-                    <span className="text-border mx-1" aria-hidden>
-                        ·
-                    </span>
-                    <Square className="size-3" aria-hidden /> {game.cartoes ?? 0}
-                </span>
-            </div>
-            <div className="font-mono text-[9px] tracking-[0.2em] uppercase text-muted-foreground/80 truncate mb-1.5">
-                {game.liga}
-            </div>
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-                <div className="text-sm font-medium truncate text-right text-muted-foreground">
-                    {game.home}
-                </div>
-                <div className="font-display text-lg font-bold tabular text-foreground/80 text-center px-2">
-                    {game.placar}
-                </div>
-                <div className="text-sm font-medium truncate text-muted-foreground">
-                    {game.away}
-                </div>
-            </div>
-        </article>
-    );
+    return <FocusRow game={game} index={index} variant="done" />;
 }
 
 /* ════════════════════════════════════════════════════════════════

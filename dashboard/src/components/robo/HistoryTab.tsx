@@ -4,12 +4,12 @@ import { Box, Card, CardContent, Typography, Table, TableHead, TableRow, TableCe
 import type { BetItem } from "@/lib/api";
 
 const STATUS_COLORS: Record<string, { label: string; color: string; bg: string }> = {
-    won: { label: "GREEN", color: "#00E676", bg: "rgba(0,230,118,0.15)" },
-    lost: { label: "RED", color: "#FF5252", bg: "rgba(255,82,82,0.15)" },
-    cashed_out: { label: "CASHOUT", color: "#FFC107", bg: "rgba(255,193,7,0.15)" },
-    open: { label: "OPEN", color: "#00B0FF", bg: "rgba(0,176,255,0.15)" },
-    error: { label: "ERROR", color: "#FF5252", bg: "rgba(255,82,82,0.15)" },
-    canceled: { label: "CANCELED", color: "#94A3B8", bg: "rgba(148,163,184,0.15)" },
+    won: { label: "GREEN", color: "#15A34A", bg: "rgba(21,163,74,0.14)" },
+    lost: { label: "RED", color: "#DC2626", bg: "rgba(220,38,38,0.12)" },
+    cashed_out: { label: "CASHOUT", color: "#B45309", bg: "rgba(180,83,9,0.14)" },
+    open: { label: "OPEN", color: "#0277BD", bg: "rgba(2,119,189,0.14)" },
+    error: { label: "ERROR", color: "#DC2626", bg: "rgba(220,38,38,0.12)" },
+    canceled: { label: "CANCELED", color: "#64748B", bg: "rgba(100,116,139,0.16)" },
 };
 
 function fmtDateTime(iso: string | null) {
@@ -49,7 +49,7 @@ export default function HistoryTab({ bets }: { bets: BetItem[] }) {
                         </TableHead>
                         <TableBody>
                             {bets.map((b) => {
-                                const s = STATUS_COLORS[b.status] ?? { label: b.status, color: "#94A3B8", bg: "rgba(148,163,184,0.15)" };
+                                const s = STATUS_COLORS[b.status] ?? { label: b.status, color: "#64748B", bg: "rgba(100,116,139,0.16)" };
                                 const delta = b.payout_cents - b.stake_cents;
                                 const isResolved = b.status !== "open";
                                 return (
@@ -73,7 +73,7 @@ export default function HistoryTab({ bets }: { bets: BetItem[] }) {
                                         <TableCell align="center">
                                             <Chip size="small" label={s.label} sx={{ fontWeight: 700, bgcolor: s.bg, color: s.color, height: 20, fontSize: "0.65rem" }} />
                                         </TableCell>
-                                        <TableCell align="right" sx={{ fontFamily: "monospace", fontSize: "0.8rem", fontWeight: 700, color: !isResolved ? "text.secondary" : delta >= 0 ? "#00E676" : "#FF5252" }}>
+                                        <TableCell align="right" sx={{ fontFamily: "monospace", fontSize: "0.8rem", fontWeight: 700, color: !isResolved ? "text.secondary" : delta >= 0 ? "#15A34A" : "#DC2626" }}>
                                             {isResolved ? `${delta >= 0 ? "+" : ""}R$ ${(delta / 100).toFixed(2)}` : "—"}
                                         </TableCell>
                                     </TableRow>

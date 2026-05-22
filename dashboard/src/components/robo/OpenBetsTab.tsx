@@ -30,7 +30,7 @@ export default function OpenBetsTab({ bets }: { bets: OpenBet[] }) {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3, delay: idx * 0.04 }}
                 >
-                    <Card sx={{ borderLeft: `4px solid ${b.mode === "real" ? "#FF6B00" : "#00B0FF"}` }}>
+                    <Card sx={{ borderLeft: `4px solid ${b.mode === "real" ? "#D9560A" : "#0277BD"}` }}>
                         <CardContent sx={{ p: 2.5 }}>
                             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1, flexWrap: "wrap", gap: 1 }}>
                                 <Box>
@@ -46,8 +46,8 @@ export default function OpenBetsTab({ bets }: { bets: OpenBet[] }) {
                                     size="small"
                                     sx={{
                                         fontWeight: 700,
-                                        bgcolor: b.mode === "real" ? "rgba(255,107,0,0.2)" : "rgba(0,176,255,0.2)",
-                                        color: b.mode === "real" ? "#FF6B00" : "#00B0FF",
+                                        bgcolor: b.mode === "real" ? "rgba(255,107,0,0.16)" : "rgba(2,119,189,0.14)",
+                                        color: b.mode === "real" ? "#D9560A" : "#0277BD",
                                     }}
                                 />
                             </Box>

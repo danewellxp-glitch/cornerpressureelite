@@ -96,8 +96,8 @@
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.45); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(128,128,128,0.7); }
 
 /* Animations */
 @keyframes fadeIn {
@@ -132,7 +132,7 @@
 .MuiCard-root:hover {
   transform: translateY(-2px);
   border-color: rgba(124, 77, 255, 0.25);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(124, 77, 255, 0.15);
+  box-shadow: 0 6px 20px rgba(31, 27, 22, 0.10), 0 0 0 1px rgba(124, 77, 255, 0.15);
 }
 
 /* ─── Buttons MUI: leve squish no clique (já que muitos não usam framer-motion) ─── */
@@ -258,18 +258,90 @@
    visual da landing, mas terreno visualmente distinto.
    ═════════════════════════════════════════════════════════════════════ */
 .piq-dashboard {
-  /* Azul profundo, claramente distinto da landing.
-     Hue 250 (azul puro), chroma 0.08-0.10 (visivelmente azul, não navy neutro).
-     Mint accent (170) fica preservado pra continuidade visual. */
-  --color-background: oklch(0.13 0.08 252);
-  --color-card: oklch(0.18 0.09 250);
-  --color-popover: oklch(0.20 0.09 250);
-  --color-secondary: oklch(0.26 0.10 248);
-  --color-muted: oklch(0.22 0.08 248);
-  --color-muted-foreground: oklch(0.72 0.04 240);
-  --color-border: oklch(0.40 0.10 245 / 50%);
-  --color-input: oklch(0.24 0.09 248);
+  /* Tema claro creme. Fundo #F6F1E7 (creme papel), cards branco puro,
+     texto quase-preto quente. Accent azul preservado (user gosta do azul).
+     Os tokens "mint" agora apontam pro azul pra continuidade das classes
+     existentes (text-mint, bg-mint/10, border-mint). */
+  --color-background: #F6F1E7;
+  --color-foreground: #1F1B16;
+  --color-card: #FFFFFF;
+  --color-card-foreground: #1F1B16;
+  --color-popover: #FFFFFF;
+  --color-popover-foreground: #1F1B16;
+  --color-primary: #2563EB;
+  --color-primary-foreground: #FFFFFF;
+  --color-secondary: #EFE9DC;
+  --color-secondary-foreground: #1F1B16;
+  --color-muted: #EFE9DC;
+  --color-muted-foreground: #6E6A60;
+  --color-accent: #2563EB;
+  --color-accent-foreground: #FFFFFF;
+  --color-border: rgba(31, 27, 22, 0.12);
+  --color-input: #E7E0D0;
+  --color-ring: #2563EB;
+  --color-mint: #2563EB;
+  --color-mint-bright: #1D4ED8;
+  --color-success: #15A34A;
+  --color-warning: #B45309;
+  --color-danger: #DC2626;
+  --color-destructive: #DC2626;
+  --color-destructive-foreground: #FFFFFF;
 }
+
+/* ─── Sidebar charcoal (#4A4A4A): contexto escuro dentro do tema claro.
+   Re-shift os tokens localmente pra texto/ícones claros funcionarem com as
+   classes existentes (text-foreground, text-muted-foreground, bg-mint/10). ─── */
+.piq-sidebar {
+  --color-card: #4A4A4A;
+  --color-foreground: #FFFFFF;
+  --color-muted-foreground: rgba(255, 255, 255, 0.62);
+  --color-border: rgba(255, 255, 255, 0.10);
+  --color-mint: oklch(0.74 0.18 235);
+  --color-mint-bright: oklch(0.82 0.14 232);
+  --color-success: #4ADE80;
+  --color-warning: #FBBF24;
+  --color-destructive: #FF6B6B;
+}
+
+/* ─── Boards carvão (mesma cor da sidebar) dentro do tema creme ───
+   A página fica creme, mas os boards (qualquer surface bg-card) viram carvão
+   #4A4A4A — idêntico ao .piq-sidebar — com texto branco e accent verde menta.
+   Mesma técnica do .piq-sidebar: re-shift local dos tokens. Qualquer filho que
+   use text-foreground / text-muted-foreground / bg-background/40 / border-border
+   / text-mint / bg-mint herda a paleta escura automaticamente, sem editar
+   componente por componente. background-color (especificidade 0,2,0) força
+   carvão chapado mesmo nas variantes bg-card/40, /60, /80. */
+.piq-dashboard [class*="bg-card"] {
+  --color-card: #4a4a4a;
+  --color-card-foreground: #ffffff;
+  --color-popover: #4a4a4a;
+  --color-popover-foreground: #ffffff;
+  --color-foreground: #ffffff;
+  --color-muted-foreground: rgba(255, 255, 255, 0.62);
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-background: #2a2a2a;
+  --color-muted: rgba(255, 255, 255, 0.08);
+  --color-secondary: rgba(255, 255, 255, 0.08);
+  --color-secondary-foreground: #ffffff;
+  --color-input: #3d3d3d;
+  --color-ring: #34d399;
+  --color-accent: #34d399;
+  --color-accent-foreground: #07120d;
+  --color-mint: #34d399;
+  --color-mint-bright: #6ee7b7;
+  --color-primary: #34d399;
+  --color-primary-foreground: #07120d;
+  --color-success: #4ade80;
+  --color-warning: #fbbf24;
+  --color-danger: #ff6b6b;
+  --color-destructive: #ff6b6b;
+  --color-destructive-foreground: #07120d;
+
+  color: var(--color-foreground);
+  background-color: #4a4a4a;
+  background-image: none;
+}
+
 .grid-bg {
   background-image:
     linear-gradient(to right, oklch(0.62 0.22 255 / 0.05) 1px, transparent 1px),

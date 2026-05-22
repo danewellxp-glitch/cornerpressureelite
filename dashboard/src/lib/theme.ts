@@ -3,8 +3,6 @@
 import { createTheme, type Theme, type PaletteColor } from "@mui/material/styles";
 
 const PURPLE = "#7C4DFF";
-const CYAN = "#00E5FF";
-const YELLOW = "#FFC107";
 
 const bouncePress = "cubic-bezier(0.34, 1.56, 0.64, 1)";
 
@@ -18,15 +16,15 @@ const resolveMain = (t: Theme, colorKey: ButtonColorKey): string => {
 
 const theme = createTheme({
     palette: {
-        mode: "dark",
+        mode: "light",
         primary: { main: PURPLE, light: "#B47CFF", dark: "#5C2DC9" },
-        secondary: { main: CYAN, light: "#6EFFFF", dark: "#00B2CC" },
-        success: { main: "#4CAF50", light: "#81C784", dark: "#388E3C" },
-        error: { main: "#FF5252", light: "#FF867F", dark: "#C50E29" },
-        warning: { main: YELLOW, light: "#FFD54F", dark: "#FF8F00" },
-        background: { default: "#0A0A1F", paper: "#131720" },
-        text: { primary: "#E4E6EB", secondary: "#8B8D97" },
-        divider: "rgba(255,255,255,0.06)",
+        secondary: { main: "#0277BD", light: "#40C4FF", dark: "#01579B" },
+        success: { main: "#15A34A", light: "#4ADE80", dark: "#0E7A38" },
+        error: { main: "#DC2626", light: "#F87171", dark: "#B91C1C" },
+        warning: { main: "#B45309", light: "#D97706", dark: "#92400E" },
+        background: { default: "#F6F1E7", paper: "#FFFFFF" },
+        text: { primary: "#1F1B16", secondary: "#6E6A60" },
+        divider: "rgba(31,27,22,0.10)",
     },
     typography: {
         fontFamily: "'Inter', 'Roboto', sans-serif",
@@ -34,7 +32,7 @@ const theme = createTheme({
         h5: { fontWeight: 700 },
         h6: { fontWeight: 600 },
         subtitle1: { fontWeight: 500 },
-        body2: { color: "#8B8D97" },
+        body2: { color: "#6E6A60" },
     },
     shape: { borderRadius: 12 },
     components: {
@@ -42,13 +40,13 @@ const theme = createTheme({
             styleOverrides: {
                 root: {
                     backgroundImage: "none",
-                    backgroundColor: "#131720",
-                    border: "1px solid rgba(255,255,255,0.06)",
+                    backgroundColor: "#FFFFFF",
+                    border: "1px solid rgba(31,27,22,0.08)",
                     transition:
                         "border-color 200ms ease-out, box-shadow 200ms ease-out, transform 200ms ease-out",
                     "&:hover": {
                         borderColor: "rgba(124,77,255,0.3)",
-                        boxShadow: "0 0 20px rgba(124,77,255,0.08)",
+                        boxShadow: "0 6px 20px rgba(31,27,22,0.10)",
                     },
                     "@media (prefers-reduced-motion: reduce)": {
                         transition: "border-color 150ms linear",
@@ -189,7 +187,7 @@ const theme = createTheme({
             styleOverrides: {
                 root: {
                     "& .MuiOutlinedInput-root": {
-                        "& fieldset": { borderColor: "rgba(255,255,255,0.12)" },
+                        "& fieldset": { borderColor: "rgba(31,27,22,0.18)" },
                         "&:hover fieldset": { borderColor: "rgba(124,77,255,0.5)" },
                     },
                 },
@@ -198,8 +196,8 @@ const theme = createTheme({
         MuiDrawer: {
             styleOverrides: {
                 paper: {
-                    backgroundColor: "#0A0A1F",
-                    borderRight: "1px solid rgba(255,255,255,0.06)",
+                    backgroundColor: "#FFFFFF",
+                    borderRight: "1px solid rgba(31,27,22,0.10)",
                 },
             },
         },

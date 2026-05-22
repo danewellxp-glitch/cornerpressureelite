@@ -24,11 +24,11 @@ function PeriodCard({
                     <Typography variant="caption" sx={{ color: "text.secondary", letterSpacing: "0.08em", textTransform: "uppercase" }}>
                         {title}
                     </Typography>
-                    <Typography variant="h4" sx={{ fontWeight: 800, fontFamily: "monospace", color: positive ? "#00E676" : "#FF5252", mt: 0.5 }}>
+                    <Typography variant="h4" sx={{ fontWeight: 800, fontFamily: "monospace", color: positive ? "#15A34A" : "#DC2626", mt: 0.5 }}>
                         {positive ? "+" : ""}R$ {(delta / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
                     </Typography>
                     <Box sx={{ display: "flex", gap: 1.5, mt: 1.5, alignItems: "baseline" }}>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: positive ? "#00E676" : "#FF5252" }}>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: positive ? "#15A34A" : "#DC2626" }}>
                             ROI {positive ? "+" : ""}{roi.toFixed(1)}%
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
@@ -54,13 +54,13 @@ export default function OverviewTab({
         <Box>
             <Grid container spacing={2} sx={{ mb: 3 }}>
                 <Grid size={{ xs: 12, md: 4 }}>
-                    <PeriodCard title="Hoje" {...pnl.today} delta={pnl.today.delta_cents} roi={pnl.today.roi_pct} color="#00B0FF" delay={0} />
+                    <PeriodCard title="Hoje" {...pnl.today} delta={pnl.today.delta_cents} roi={pnl.today.roi_pct} color="#0277BD" delay={0} />
                 </Grid>
                 <Grid size={{ xs: 12, md: 4 }}>
-                    <PeriodCard title="Esta semana" {...pnl.week} delta={pnl.week.delta_cents} roi={pnl.week.roi_pct} color="#9C6DFF" delay={0.08} />
+                    <PeriodCard title="Esta semana" {...pnl.week} delta={pnl.week.delta_cents} roi={pnl.week.roi_pct} color="#7C4DFF" delay={0.08} />
                 </Grid>
                 <Grid size={{ xs: 12, md: 4 }}>
-                    <PeriodCard title={`${pnl.days} dias`} {...pnl.total} delta={pnl.total.delta_cents} roi={pnl.total.roi_pct} color="#00E676" delay={0.16} />
+                    <PeriodCard title={`${pnl.days} dias`} {...pnl.total} delta={pnl.total.delta_cents} roi={pnl.total.roi_pct} color="#15A34A" delay={0.16} />
                 </Grid>
             </Grid>
 
@@ -79,18 +79,18 @@ export default function OverviewTab({
                                 <AreaChart data={pnl.series.map((s) => ({ date: s.date.slice(5), delta: s.delta_cents / 100 }))}>
                                     <defs>
                                         <linearGradient id="pnlArea" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stopColor="#00E676" stopOpacity={0.6} />
-                                            <stop offset="100%" stopColor="#00E676" stopOpacity={0.02} />
+                                            <stop offset="0%" stopColor="#15A34A" stopOpacity={0.6} />
+                                            <stop offset="100%" stopColor="#15A34A" stopOpacity={0.02} />
                                         </linearGradient>
                                     </defs>
-                                    <CartesianGrid stroke="rgba(255,255,255,0.04)" />
-                                    <XAxis dataKey="date" stroke="rgba(255,255,255,0.4)" fontSize={11} />
-                                    <YAxis stroke="rgba(255,255,255,0.4)" fontSize={11} />
+                                    <CartesianGrid stroke="rgba(31,27,22,0.08)" />
+                                    <XAxis dataKey="date" stroke="#8A857B" fontSize={11} />
+                                    <YAxis stroke="#8A857B" fontSize={11} />
                                     <Tooltip
-                                        contentStyle={{ background: "#0d1b2a", border: "1px solid rgba(255,255,255,0.1)" }}
+                                        contentStyle={{ background: "#FFFFFF", border: "1px solid rgba(31,27,22,0.12)", borderRadius: 8, color: "#1F1B16", boxShadow: "0 6px 20px rgba(31,27,22,0.10)" }}
                                         formatter={(v) => `R$ ${Number(v ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`}
                                     />
-                                    <Area type="monotone" dataKey="delta" stroke="#00E676" strokeWidth={2} fill="url(#pnlArea)" />
+                                    <Area type="monotone" dataKey="delta" stroke="#15A34A" strokeWidth={2} fill="url(#pnlArea)" />
                                 </AreaChart>
                             </ResponsiveContainer>
                         </Box>

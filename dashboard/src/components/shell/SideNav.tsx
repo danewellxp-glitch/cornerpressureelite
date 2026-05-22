@@ -80,7 +80,7 @@ export function SideNav({
     return (
         <aside
             className={cn(
-                "relative h-screen sticky top-0 flex flex-col border-r border-border bg-card/40 backdrop-blur-xl transition-[width] duration-300 shrink-0",
+                "piq-sidebar relative h-screen sticky top-0 flex flex-col border-r border-black/10 bg-[#4A4A4A] transition-[width] duration-300 shrink-0",
                 open ? "w-[260px]" : "w-[72px]",
             )}
         >

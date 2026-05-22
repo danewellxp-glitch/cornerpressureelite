@@ -6,35 +6,32 @@ import {
     Loader2,
     Inbox,
     Settings,
-    TrendingUp,
     Check,
     X,
     Flag,
     Square,
-    Clock,
+    Gift,
+    Trophy,
+    Goal,
+    Target,
+    Plus,
 } from "lucide-react";
 import {
     fetchUserSignals,
     fetchUserStats,
     fetchBancaSummary,
     decideSignal,
+    confirmSignalResult,
+    confirmManualBet,
     type BancaSummary,
     type UserSignalDetail,
     type UserStats,
+    type DecisionLeg,
+    type LegMercado,
 } from "@/lib/api";
 import { cn, fmtTime } from "@/lib/format";
-
-/**
- * Minhas Apostas — pagina dedicada ao log de decisoes manuais do user.
- *
- * Desacoplada do Robo (que e auto-bet). Aqui o user decide signal-by-signal:
- *  - Aguardando decisao (pending)
- *  - Em andamento (entered, sem resultado ainda)
- *  - Encerradas (entered com resultado GREEN/RED/PUSH/VOID)
- *
- * Stats derivados de user_signal_decisions. Banca debita stake otimisticamente
- * no momento da entrada via movement bet_loss negativo (ver BancaRepo).
- */
+import { DecisionModal } from "./DecisionModal";
+import { AddBetModal } from "./AddBetModal";
 
 type TabId = "pending" | "open" | "closed";
 const TABS: { id: TabId; label: string }[] = [
@@ -57,6 +54,24 @@ function tabOf(s: UserSignalDetail): TabId | null {
 const brl = (cents: number) =>
     (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
+const MERCADO_LABEL: Record<LegMercado, string> = {
+    escanteios: "Escanteios",
+    cartoes: "Cartões",
+    gols: "Gols / Marcador",
+    "1x2": "1X2 / Resultado",
+    ambas_marcam: "Ambas Marcam",
+    custom: "Outro",
+};
+
+const MERCADO_ICON: Record<LegMercado, typeof Flag> = {
+    escanteios: Flag,
+    cartoes: Square,
+    gols: Goal,
+    "1x2": Trophy,
+    ambas_marcam: Target,
+    custom: Target,
+};
+
 export default function MinhasApostasPanel() {
     const [tab, setTab] = useState<TabId>("pending");
     const [signals, setSignals] = useState<UserSignalDetail[]>([]);
@@ -64,6 +79,8 @@ export default function MinhasApostasPanel() {
     const [banca, setBanca] = useState<BancaSummary | null>(null);
     const [loading, setLoading] = useState(true);
     const [decideTarget, setDecideTarget] = useState<UserSignalDetail | null>(null);
+    const [addBetOpen, setAddBetOpen] = useState(false);
+    const [confirmTarget, setConfirmTarget] = useState<UserSignalDetail | null>(null);
 
     const loadAll = useCallback(async () => {
         try {
@@ -93,7 +110,6 @@ export default function MinhasApostasPanel() {
             const t = tabOf(s);
             if (t) out[t].push(s);
         }
-        // Mais recente primeiro
         for (const k of Object.keys(out) as TabId[]) {
             out[k].sort((a, b) => {
                 const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
@@ -120,6 +136,19 @@ export default function MinhasApostasPanel() {
         }
     };
 
+    // Numero de apostas que precisam de confirmacao manual (signal terminou + decision is_multi)
+    const aguardandoConfirmacao = useMemo(
+        () =>
+            signals.filter(
+                (s) =>
+                    s.decision.decision === "entered" &&
+                    !s.decision.resultado &&
+                    s.decision.requires_manual_confirmation &&
+                    s.signal_resultado !== "PENDENTE",
+            ).length,
+        [signals],
+    );
+
     return (
         <div className="space-y-6 max-w-[1200px] mx-auto">
             <header className="flex flex-wrap items-end justify-between gap-3">
@@ -129,9 +158,9 @@ export default function MinhasApostasPanel() {
                     </div>
                     <h1 className="font-display text-2xl font-bold mt-1">Minhas Apostas</h1>
                     <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-                        Independente do Robô. Cada sinal emitido aparece aqui pra você
-                        confirmar (entrou com odd X / valor Y) ou pular. Só o que você
-                        confirma conta pro ROI e debita da banca.
+                        Independente do Robô. Sinal CPES é só ponto de partida — você
+                        pode compor multi com outros mercados (gols, 1X2, cartões etc).
+                        Só o que você confirma conta pro ROI e debita da banca.
                     </p>
                 </div>
                 {banca?.configured && (
@@ -167,6 +196,17 @@ export default function MinhasApostasPanel() {
                 </div>
             )}
 
+            {aguardandoConfirmacao > 0 && (
+                <div className="rounded-2xl border border-info/40 bg-info/10 p-4 flex items-center gap-3 text-sm">
+                    <Trophy className="size-5 text-info shrink-0" />
+                    <span className="text-info-foreground">
+                        <strong>{aguardandoConfirmacao}</strong>{" "}
+                        {aguardandoConfirmacao === 1 ? "aposta múltipla aguarda" : "apostas múltiplas aguardam"}{" "}
+                        sua confirmação de resultado. Veja a aba <strong>Em andamento</strong>.
+                    </span>
+                </div>
+            )}
+
             {/* Stats agregados */}
             <section className="grid gap-3 grid-cols-2 md:grid-cols-4">
                 <StatBox
@@ -187,13 +227,15 @@ export default function MinhasApostasPanel() {
                     tone={(stats?.pnl_cents ?? 0) >= 0 ? "mint" : "danger"}
                 />
                 <StatBox
-                    label="Odd média"
-                    value={(stats?.avg_odd ?? 0).toFixed(2)}
-                    sub={`${brl(stats?.staked_cents ?? 0)} apostado`}
+                    label="Bonus total"
+                    value={brl(stats?.bonus_total_cents ?? 0)}
+                    sub={`odd média ${(stats?.avg_odd ?? 0).toFixed(2)}`}
+                    tone="mint"
                 />
             </section>
 
-            {/* Tabs */}
+            {/* Tabs + Adicionar Aposta */}
+            <div className="flex items-center justify-between gap-3 flex-wrap">
             <nav className="inline-flex rounded-lg border border-border bg-card/60 p-0.5">
                 {TABS.map((t) => {
                     const active = tab === t.id;
@@ -226,6 +268,14 @@ export default function MinhasApostasPanel() {
                     );
                 })}
             </nav>
+                <button
+                    onClick={() => setAddBetOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 border border-mint bg-mint/10 text-mint-bright font-mono text-xs tracking-wider hover:bg-mint/20 transition rounded-lg"
+                >
+                    <Plus className="size-3.5" />
+                    ADICIONAR APOSTA
+                </button>
+            </div>
 
             {/* Lista */}
             {loading && visible.length === 0 ? (
@@ -238,11 +288,13 @@ export default function MinhasApostasPanel() {
             ) : (
                 <div className="grid gap-3 lg:grid-cols-2">
                     {visible.map((s) => (
-                        <SignalCard
+                        <BetCard
                             key={s.signal_id}
                             signal={s}
+                            unitValueCents={banca?.unit_value_cents ?? 0}
                             onEnter={() => setDecideTarget(s)}
                             onSkip={() => handleSkip(s)}
+                            onConfirm={() => setConfirmTarget(s)}
                         />
                     ))}
                 </div>
@@ -255,6 +307,28 @@ export default function MinhasApostasPanel() {
                     onClose={() => setDecideTarget(null)}
                     onConfirmed={async () => {
                         setDecideTarget(null);
+                        await loadAll();
+                    }}
+                />
+            )}
+
+            {confirmTarget && (
+                <ConfirmResultModal
+                    signal={confirmTarget}
+                    onClose={() => setConfirmTarget(null)}
+                    onConfirmed={async () => {
+                        setConfirmTarget(null);
+                        await loadAll();
+                    }}
+                />
+            )}
+
+            {addBetOpen && (
+                <AddBetModal
+                    banca={banca}
+                    onClose={() => setAddBetOpen(false)}
+                    onCreated={async () => {
+                        setAddBetOpen(false);
                         await loadAll();
                     }}
                 />
@@ -297,70 +371,190 @@ function StatBox({
     );
 }
 
-function SignalCard({
+/* ────────────────────────────────────────────────────────────── */
+/* BetCard — estilo Betano: legs + apostado + premios + bonus + total */
+
+function BetCard({
     signal,
+    unitValueCents,
     onEnter,
     onSkip,
+    onConfirm,
 }: {
     signal: UserSignalDetail;
+    unitValueCents: number;
     onEnter: () => void;
     onSkip: () => void;
+    onConfirm: () => void;
 }) {
     const d = signal.decision;
     const isEscanteios = signal.tipo_analise === "ESCANTEIOS";
-    const Icon = isEscanteios ? Flag : Square;
+    const stake = d.valor_apostado_cents ?? 0;
+    const odd = d.odd_entrada ?? 0;
+    const stakeUnits = unitValueCents > 0 ? stake / unitValueCents : 0;
+
+    // Premios brutos = stake * odd (retorno total se ganhar, sem bonus)
+    const premiosBrutos = Math.round(stake * odd);
+    // Bonus aplica sobre lucro liquido
+    const bonus = Math.round((premiosBrutos - stake) * d.bonus_pct);
+    const totalRetorno = premiosBrutos + bonus;
+
+    // Estado visual
+    const result = d.resultado ?? null;
+    const needsConfirm =
+        d.decision === "entered" &&
+        !d.resultado &&
+        d.requires_manual_confirmation &&
+        signal.signal_resultado !== "PENDENTE";
 
     return (
         <article
             className={cn(
-                "piq-in rounded-2xl border border-border bg-card p-5 space-y-3",
+                "piq-in rounded-2xl border border-border bg-card overflow-hidden",
                 d.decision === "skipped" && "opacity-50",
-                d.decision === "entered" && "border-mint/40",
+                result === "GREEN" && "border-success/40",
+                result === "RED" && "border-destructive/40",
+                needsConfirm && "border-info/40 ring-1 ring-info/30",
             )}
         >
-            <div className="flex items-start justify-between gap-3">
+            {/* Header */}
+            <div className="p-4 border-b border-border/50 flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                        <Icon
-                            className={cn(
-                                "size-3",
-                                isEscanteios ? "text-mint" : "text-warning",
-                            )}
-                        />
                         <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
-                            {signal.tipo_sinal} · {isEscanteios ? "ESC" : "CRD"}
+                            {d.decision === "entered" ? (d.is_multi ? "MÚLTIPLA" : "SIMPLES") : signal.tipo_sinal}
+                        </span>
+                        <span className="font-mono text-[10px] text-muted-foreground">·</span>
+                        <span className="font-mono text-[10px] tracking-wider uppercase text-muted-foreground">
+                            {isEscanteios ? "ESCANTEIOS" : "CARTÕES"}
                         </span>
                         {signal.minuto != null && (
-                            <span className="font-mono text-[10px] tabular text-muted-foreground">
-                                · {signal.minuto}'
-                            </span>
+                            <>
+                                <span className="font-mono text-[10px] text-muted-foreground">·</span>
+                                <span className="font-mono text-[10px] tabular text-muted-foreground">
+                                    {signal.minuto}&apos;
+                                </span>
+                            </>
                         )}
                     </div>
                     <h3 className="font-display text-base font-semibold leading-tight truncate">
                         {signal.jogo_descricao || "—"}
                     </h3>
-                    <div className="font-mono text-[10px] text-muted-foreground mt-1 tabular">
+                </div>
+                {d.decision === "entered" && stake > 0 && (
+                    <div className="text-right shrink-0">
+                        <div className="font-mono text-[9px] tracking-wider text-muted-foreground uppercase">
+                            Aposta
+                        </div>
+                        <div className="font-display font-bold tabular text-sm">{brl(stake)}</div>
+                    </div>
+                )}
+                {d.decision !== "entered" && (
+                    <ResultPill r={result ?? signal.signal_resultado ?? "PENDENTE"} />
+                )}
+                {d.decision === "entered" && (
+                    <div className="shrink-0 flex items-center gap-2">
+                        <div className="bg-muted/60 px-2 py-1 rounded-md">
+                            <span className="font-mono text-sm font-bold tabular">{odd.toFixed(2)}</span>
+                        </div>
+                        <ResultPill
+                            r={
+                                needsConfirm
+                                    ? "CONFIRM"
+                                    : result ?? (d.decision === "entered" ? "ABERTA" : "PENDENTE")
+                            }
+                        />
+                    </div>
+                )}
+            </div>
+
+            {/* Legs (entered only) */}
+            {d.decision === "entered" && (
+                <div className="p-4 space-y-2 border-b border-border/50">
+                    {d.legs.length === 0 ? (
+                        // single sem legs registradas — usa o sinal CPES como leg implicita
+                        <SingleLegRow
+                            mercado={isEscanteios ? "escanteios" : "cartoes"}
+                            descricao={`${signal.tipo_sinal} ${isEscanteios ? "Escanteios" : "Cartões"} Mais de ${signal.linha}`}
+                            linha={signal.linha}
+                            odd={odd}
+                            resultado={result}
+                        />
+                    ) : (
+                        d.legs.map((leg) => (
+                            <SingleLegRow
+                                key={leg.id ?? `${leg.ordem}-${leg.descricao}`}
+                                mercado={leg.mercado}
+                                descricao={leg.descricao}
+                                linha={leg.linha}
+                                odd={leg.odd_leg}
+                                resultado={leg.resultado}
+                            />
+                        ))
+                    )}
+                </div>
+            )}
+
+            {/* Sinal info (pending/skipped only) */}
+            {d.decision !== "entered" && (
+                <div className="p-4 border-b border-border/50">
+                    <div className="font-mono text-[10px] text-muted-foreground tabular">
                         Linha {signal.linha} @ odd {signal.odd?.toFixed(2)} · score{" "}
                         {signal.pressure_score} · edge {signal.edge}
                     </div>
                 </div>
-                <ResultPill r={d.resultado ?? signal.signal_resultado ?? "PENDENTE"} />
-            </div>
+            )}
 
-            {d.decision === "entered" && (
-                <div className="rounded-lg border border-mint/30 bg-mint/5 p-3 space-y-1">
+            {/* Footer com Aposta / Premios / Bonus / Total */}
+            {d.decision === "entered" && stake > 0 && (
+                <div className="p-4 space-y-1.5 bg-muted/20">
                     <div className="flex items-center justify-between font-mono text-xs tabular">
-                        <span className="text-muted-foreground">Entrada:</span>
-                        <span className="text-mint-bright">
-                            {brl(d.valor_apostado_cents ?? 0)} @ {d.odd_entrada?.toFixed(2)}
+                        <span className="text-muted-foreground">
+                            Aposta
+                            {stakeUnits > 0 && (
+                                <span className="text-info ml-1">({stakeUnits.toFixed(1)}u)</span>
+                            )}
+                        </span>
+                        <span>{brl(stake)}</span>
+                    </div>
+                    <div className="flex items-center justify-between font-mono text-xs tabular">
+                        <span className="text-muted-foreground">
+                            Prêmios{" "}
+                            <span className="text-[10px] text-muted-foreground/60">
+                                ({odd.toFixed(2)}×)
+                            </span>
+                        </span>
+                        <span>{brl(premiosBrutos)}</span>
+                    </div>
+                    {d.bonus_pct > 0 && (
+                        <div className="flex items-center justify-between font-mono text-xs tabular text-mint-bright">
+                            <span className="flex items-center gap-1.5">
+                                <Gift className="size-3" />
+                                Bonus turbinada +{(d.bonus_pct * 100).toFixed(0)}%
+                            </span>
+                            <span>+{brl(bonus)}</span>
+                        </div>
+                    )}
+                    <div className="flex items-center justify-between font-mono text-sm tabular border-t border-border/50 pt-1.5 mt-1.5">
+                        <span className="font-semibold">
+                            {result === "GREEN" ? "Recebido" : result === "RED" ? "Perdido" : "Retorno se GREEN"}
+                        </span>
+                        <span
+                            className={cn(
+                                "font-bold",
+                                result === "GREEN" && "text-success",
+                                result === "RED" && "text-destructive line-through",
+                            )}
+                        >
+                            {result === "RED" ? brl(stake) : brl(totalRetorno)}
                         </span>
                     </div>
-                    {d.resultado && d.payout_cents != null && (
-                        <div className="flex items-center justify-between font-mono text-xs tabular">
-                            <span className="text-muted-foreground">P&L:</span>
+                    {result && d.payout_cents != null && (
+                        <div className="flex items-center justify-between font-mono text-[10px] tabular text-muted-foreground pt-1">
+                            <span>P&L líquido:</span>
                             <span
                                 className={cn(
-                                    d.payout_cents >= 0 ? "text-mint-bright" : "text-destructive",
+                                    d.payout_cents >= 0 ? "text-success" : "text-destructive",
                                 )}
                             >
                                 {d.payout_cents >= 0 ? "+" : ""}
@@ -369,16 +563,17 @@ function SignalCard({
                         </div>
                     )}
                     {d.decided_at && (
-                        <div className="flex items-center justify-between font-mono text-[10px] text-muted-foreground">
-                            <span>decidido:</span>
-                            <span>{fmtTime(d.decided_at)}</span>
+                        <div className="font-mono text-[10px] text-muted-foreground text-right pt-1">
+                            registrada {fmtTime(d.decided_at)}
+                            {d.manually_confirmed_at && ` · confirmada ${fmtTime(d.manually_confirmed_at)}`}
                         </div>
                     )}
                 </div>
             )}
 
+            {/* Actions */}
             {d.decision === "pending" && (
-                <div className="flex gap-2">
+                <div className="p-4 flex gap-2">
                     <button
                         onClick={onEnter}
                         className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 font-mono text-xs tracking-wider text-mint border border-mint/40 hover:bg-mint hover:text-background transition rounded-lg"
@@ -396,12 +591,68 @@ function SignalCard({
                 </div>
             )}
 
+            {needsConfirm && (
+                <div className="p-4 border-t border-info/30 bg-info/5 space-y-2">
+                    <div className="font-mono text-[10px] tracking-wider text-info uppercase">
+                        Jogo terminou — confirme o resultado
+                    </div>
+                    <button
+                        onClick={onConfirm}
+                        className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 font-mono text-xs tracking-wider text-info border border-info/40 hover:bg-info hover:text-background transition rounded-lg"
+                    >
+                        <Trophy className="size-3.5" />
+                        CONFIRMAR RESULTADO
+                    </button>
+                </div>
+            )}
+
             {d.decision === "skipped" && (
-                <div className="font-mono text-[10px] tracking-wider text-muted-foreground text-center">
+                <div className="p-4 font-mono text-[10px] tracking-wider text-muted-foreground text-center">
                     PULADO
                 </div>
             )}
         </article>
+    );
+}
+
+function SingleLegRow({
+    mercado,
+    descricao,
+    linha,
+    odd,
+    resultado,
+}: {
+    mercado: LegMercado;
+    descricao: string;
+    linha: number | null;
+    odd: number;
+    resultado: "GREEN" | "RED" | "PUSH" | "VOID" | null;
+}) {
+    const Icon = MERCADO_ICON[mercado] ?? Target;
+    return (
+        <div className="flex items-start gap-2.5 text-sm">
+            <div
+                className={cn(
+                    "size-5 rounded-full border-2 grid place-items-center shrink-0 mt-0.5",
+                    resultado === "GREEN" && "border-success bg-success/20",
+                    resultado === "RED" && "border-destructive bg-destructive/20",
+                    !resultado && "border-mint/50",
+                )}
+            >
+                {resultado === "GREEN" && <Check className="size-3 text-success" />}
+                {resultado === "RED" && <X className="size-3 text-destructive" />}
+                {!resultado && <Icon className="size-2.5 text-mint" />}
+            </div>
+            <div className="flex-1 min-w-0">
+                <div className="font-medium leading-tight truncate">{descricao}</div>
+                <div className="font-mono text-[10px] text-muted-foreground mt-0.5">
+                    {MERCADO_LABEL[mercado]}
+                    {linha != null && ` · linha ${linha}`}
+                    {" · "}
+                    <span className="tabular">@ {odd.toFixed(2)}</span>
+                </div>
+            </div>
+        </div>
     );
 }
 
@@ -412,7 +663,19 @@ function ResultPill({ r }: { r: string }) {
         PENDENTE: "text-warning border-warning/40 bg-warning/10",
         PUSH: "text-muted-foreground border-border bg-muted/40",
         VOID: "text-muted-foreground border-border bg-muted/40",
+        CONFIRM: "text-info border-info/40 bg-info/10 animate-pulse",
+        ABERTA: "text-mint border-mint/40 bg-mint/10",
     };
+    const label =
+        r === "PENDENTE"
+            ? "PEND"
+            : r === "GREEN"
+              ? "GANHOU"
+              : r === "RED"
+                ? "PERDEU"
+                : r === "CONFIRM"
+                  ? "CONFIRMAR"
+                  : r;
     return (
         <span
             className={cn(
@@ -420,7 +683,7 @@ function ResultPill({ r }: { r: string }) {
                 map[r] ?? "border-border bg-muted/40 text-muted-foreground",
             )}
         >
-            {r === "PENDENTE" ? "PEND" : r}
+            {label}
         </span>
     );
 }
@@ -429,11 +692,11 @@ function EmptyState({ tab }: { tab: TabId }) {
     const copy: Record<TabId, { title: string; desc: string }> = {
         pending: {
             title: "Nenhum sinal aguardando decisão",
-            desc: "Quando o sistema emitir um sinal, ele aparece aqui pra você confirmar se entrou ou pular.",
+            desc: "Quando o sistema emitir um sinal, ele aparece aqui pra você confirmar se entrou (single ou multi) ou pular.",
         },
         open: {
             title: "Nenhuma aposta em andamento",
-            desc: "Apostas que você confirmou (Entrei) aparecem aqui enquanto o jogo ainda não terminou.",
+            desc: "Apostas confirmadas aparecem aqui enquanto o jogo ainda não terminou. Múltiplas vão precisar de confirmação manual quando o jogo encerrar.",
         },
         closed: {
             title: "Sem histórico ainda",
@@ -453,64 +716,42 @@ function EmptyState({ tab }: { tab: TabId }) {
 }
 
 /* ────────────────────────────────────────────────────────────── */
+/* ConfirmResultModal — confirma manualmente resultado pos-jogo   */
 
-function DecisionModal({
+function ConfirmResultModal({
     signal,
-    banca,
     onClose,
     onConfirmed,
 }: {
     signal: UserSignalDetail;
-    banca: BancaSummary | null;
     onClose: () => void;
     onConfirmed: () => void;
 }) {
-    const sugestao =
-        banca?.configured && banca.unit_pct
-            ? Math.round((banca.banca_atual_cents * banca.unit_pct) / 100)
-            : 0;
-    const [oddStr, setOddStr] = useState((signal.odd ?? 0).toFixed(2));
-    const [valStr, setValStr] = useState((sugestao / 100).toFixed(2));
-    const [busy, setBusy] = useState(false);
+    const [busy, setBusy] = useState<"GREEN" | "RED" | "PUSH" | "VOID" | null>(null);
     const [err, setErr] = useState<string | null>(null);
 
-    useEffect(() => {
-        const h = (e: KeyboardEvent) => {
-            if (e.key === "Escape" && !busy) onClose();
-        };
-        document.addEventListener("keydown", h);
-        return () => document.removeEventListener("keydown", h);
-    }, [busy, onClose]);
-
-    const confirm = async () => {
-        const odd = parseFloat(oddStr);
-        const val = Math.round(parseFloat(valStr) * 100);
-        if (!odd || odd <= 1.0) {
-            setErr("Odd precisa ser > 1.00");
-            return;
-        }
-        if (!val || val <= 0) {
-            setErr("Valor precisa ser > 0");
-            return;
-        }
-        if (banca?.configured && val > banca.banca_atual_cents) {
-            setErr(`Valor maior que saldo (${brl(banca.banca_atual_cents)})`);
-            return;
-        }
-        setBusy(true);
+    const confirm = async (resultado: "GREEN" | "RED" | "PUSH" | "VOID") => {
+        setBusy(resultado);
         setErr(null);
         try {
-            await decideSignal(signal.signal_id, {
-                decision: "entered",
-                odd_entrada: odd,
-                valor_apostado_cents: val,
-            });
+            if (signal.is_manual && signal.decision.id != null) {
+                await confirmManualBet(signal.decision.id, resultado);
+            } else {
+                await confirmSignalResult(signal.signal_id, resultado);
+            }
             onConfirmed();
         } catch (e) {
-            setErr(e instanceof Error ? e.message : "Erro ao registrar");
-            setBusy(false);
+            setErr(e instanceof Error ? e.message : "Erro ao confirmar");
+            setBusy(null);
         }
     };
+
+    const d = signal.decision;
+    const stake = d.valor_apostado_cents ?? 0;
+    const odd = d.odd_entrada ?? 0;
+    const premiosBrutos = Math.round(stake * odd);
+    const bonus = Math.round((premiosBrutos - stake) * d.bonus_pct);
+    const totalRetorno = premiosBrutos + bonus;
 
     return (
         <div
@@ -522,61 +763,69 @@ function DecisionModal({
                 onClick={(e) => e.stopPropagation()}
             >
                 <div>
-                    <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-mint mb-2">
-                        registrar entrada
+                    <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-info mb-2">
+                        confirmar resultado
                     </div>
                     <h3 className="font-display text-xl font-bold leading-tight">
                         {signal.jogo_descricao}
                     </h3>
-                    <p className="text-xs text-muted-foreground mt-1.5 font-mono">
-                        {signal.tipo_sinal} · linha {signal.linha} · score {signal.pressure_score} ·
-                        edge {signal.edge}
+                    <p className="text-xs text-muted-foreground mt-1.5">
+                        Sua aposta foi múltipla com {d.legs.length} legs. CPES não consegue
+                        verificar todos os mercados — confirme você como saiu.
                     </p>
                 </div>
 
-                {!banca?.configured && (
-                    <div className="text-xs text-warning border border-warning/40 bg-warning/10 p-2 rounded">
-                        Banca não configurada — entrada vai contar pro ROI mas o saldo não
-                        vai debitar.
+                <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5 font-mono text-xs tabular">
+                    <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Aposta:</span>
+                        <span>{brl(stake)} @ {odd.toFixed(2)}</span>
                     </div>
-                )}
+                    <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Se GREEN recebe:</span>
+                        <span className="text-mint-bright font-bold">{brl(totalRetorno)}</span>
+                    </div>
+                    {d.bonus_pct > 0 && (
+                        <div className="flex items-center justify-between text-mint-bright text-[10px]">
+                            <span>(inclui bonus +{(d.bonus_pct * 100).toFixed(0)}%)</span>
+                            <span>+{brl(bonus)}</span>
+                        </div>
+                    )}
+                </div>
 
-                <div className="space-y-3">
-                    <label className="block">
-                        <span className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
-                            Odd pega
-                        </span>
-                        <input
-                            type="number"
-                            step="0.01"
-                            min="1.01"
-                            value={oddStr}
-                            onChange={(e) => setOddStr(e.target.value)}
-                            className="mt-1 w-full bg-input border border-border px-3 py-2 font-mono text-sm tabular focus:outline-none focus:border-mint rounded-lg"
-                            disabled={busy}
-                        />
-                    </label>
-                    <label className="block">
-                        <span className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
-                            Valor (R$)
-                        </span>
-                        <input
-                            type="number"
-                            step="0.01"
-                            min="0.01"
-                            value={valStr}
-                            onChange={(e) => setValStr(e.target.value)}
-                            className="mt-1 w-full bg-input border border-border px-3 py-2 font-mono text-sm tabular focus:outline-none focus:border-mint rounded-lg"
-                            disabled={busy}
-                        />
-                        {banca?.configured && (
-                            <span className="font-mono text-[10px] text-muted-foreground mt-1 block">
-                                saldo: {brl(banca.banca_atual_cents)}
-                                {banca.unit_pct &&
-                                    ` · sugestão ${banca.unit_pct}% = ${brl(sugestao)}`}
-                            </span>
-                        )}
-                    </label>
+                <div className="grid grid-cols-2 gap-2">
+                    <button
+                        onClick={() => confirm("GREEN")}
+                        disabled={!!busy}
+                        className="px-4 py-3 border-2 border-success bg-success/10 hover:bg-success hover:text-background text-success font-mono text-sm tracking-wider transition disabled:opacity-50 rounded-lg flex items-center justify-center gap-2"
+                    >
+                        <Check className="size-4" />
+                        {busy === "GREEN" ? "…" : "GANHOU"}
+                    </button>
+                    <button
+                        onClick={() => confirm("RED")}
+                        disabled={!!busy}
+                        className="px-4 py-3 border-2 border-destructive bg-destructive/10 hover:bg-destructive hover:text-background text-destructive font-mono text-sm tracking-wider transition disabled:opacity-50 rounded-lg flex items-center justify-center gap-2"
+                    >
+                        <X className="size-4" />
+                        {busy === "RED" ? "…" : "PERDEU"}
+                    </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                    <button
+                        onClick={() => confirm("PUSH")}
+                        disabled={!!busy}
+                        className="px-3 py-2 border border-border hover:border-foreground/40 text-muted-foreground hover:text-foreground font-mono text-xs tracking-wider transition disabled:opacity-50 rounded-lg"
+                    >
+                        {busy === "PUSH" ? "…" : "PUSH (devolveu)"}
+                    </button>
+                    <button
+                        onClick={() => confirm("VOID")}
+                        disabled={!!busy}
+                        className="px-3 py-2 border border-border hover:border-foreground/40 text-muted-foreground hover:text-foreground font-mono text-xs tracking-wider transition disabled:opacity-50 rounded-lg"
+                    >
+                        {busy === "VOID" ? "…" : "VOID (anulada)"}
+                    </button>
                 </div>
 
                 {err && (
@@ -585,22 +834,13 @@ function DecisionModal({
                     </div>
                 )}
 
-                <div className="flex gap-2 justify-end">
-                    <button
-                        onClick={onClose}
-                        disabled={busy}
-                        className="px-4 py-2 border border-border font-mono text-xs tracking-wider hover:text-foreground text-muted-foreground transition rounded-lg"
-                    >
-                        CANCELAR
-                    </button>
-                    <button
-                        onClick={confirm}
-                        disabled={busy}
-                        className="px-4 py-2 border border-mint bg-mint text-background font-mono text-xs tracking-wider hover:bg-mint-bright transition disabled:opacity-50 rounded-lg"
-                    >
-                        {busy ? "REGISTRANDO…" : "CONFIRMAR ENTRADA"}
-                    </button>
-                </div>
+                <button
+                    onClick={onClose}
+                    disabled={!!busy}
+                    className="w-full px-4 py-2 border border-border font-mono text-xs tracking-wider hover:text-foreground text-muted-foreground transition rounded-lg"
+                >
+                    CANCELAR
+                </button>
             </div>
         </div>
     );

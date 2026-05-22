@@ -456,21 +456,49 @@ export interface UserStats {
   winrate: number;       // %
   staked_cents: number;
   pnl_cents: number;
+  bonus_total_cents: number;
   roi_pct: number;       // %
   roi_total: number;     // reais (retro-compat)
   avg_odd: number;
   aguardando_decisao: number;
+  aguardando_confirmacao: number;
 }
 
 export type UserDecisionState = "pending" | "entered" | "skipped";
 
+export type LegMercado =
+  | "escanteios"
+  | "cartoes"
+  | "gols"
+  | "1x2"
+  | "ambas_marcam"
+  | "custom";
+
+export interface DecisionLeg {
+  id?: number;
+  ordem: number;
+  mercado: LegMercado;
+  descricao: string;
+  linha: number | null;
+  odd_leg: number;
+  resultado: "GREEN" | "RED" | "PUSH" | "VOID" | null;
+}
+
 export interface UserSignalDecision {
+  id?: number;
   decision: UserDecisionState;
   odd_entrada: number | null;
   valor_apostado_cents: number | null;
   resultado: "GREEN" | "RED" | "PUSH" | "VOID" | null;
   payout_cents: number | null;
+  bonus_pct: number;
+  bonus_cents: number;
+  is_multi: boolean;
+  requires_manual_confirmation: boolean;
   decided_at: string | null;
+  settled_at: string | null;
+  manually_confirmed_at?: string | null;
+  legs: DecisionLeg[];
 }
 
 export interface UserSignalDetail {
@@ -489,6 +517,7 @@ export interface UserSignalDetail {
   matching_tiers: string[];
   minuto: number | null;
   placar: string | null;
+  is_manual?: boolean;
   decision: UserSignalDecision;
 }
 
@@ -497,17 +526,100 @@ export const fetchUserStats = () => apiFetch<UserStats>("/users/me/stats");
 export const fetchUserSignals = (limit = 100) =>
   apiFetch<UserSignalDetail[]>(`/users/me/signals?limit=${limit}`);
 
+export interface DecideEnteredBody {
+  decision: "entered";
+  odd_entrada: number;
+  valor_apostado_cents: number;
+  bonus_pct?: number;
+  legs?: Array<{
+    mercado: LegMercado;
+    descricao: string;
+    linha?: number | null;
+    odd_leg: number;
+  }>;
+}
+
 export const decideSignal = (
   signalId: number,
-  body:
-    | { decision: "entered"; odd_entrada: number; valor_apostado_cents: number }
-    | { decision: "skipped" },
+  body: DecideEnteredBody | { decision: "skipped" },
 ) =>
   apiFetch<UserSignalDecision & { id: number }>(`/signals/${signalId}/decision`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+
+/* ─── Apostas manuais (migration 0017) ─────────────────────────── */
+
+export interface LiveGamesState {
+  atualizado: string | null;
+  ciclo?: number;
+  na_janela: LiveGame[];
+  pre_janela: LiveGame[];
+  pos_janela: LiveGame[];
+}
+
+export const fetchLiveGames = () => apiFetch<LiveGamesState>("/live-games");
+
+export interface ManualBetLeg {
+  mercado: "escanteios" | "cartoes";
+  descricao: string;
+  jogo_id: number;
+  linha: number;
+  side: "over" | "under";
+  odd_leg: number;
+}
+
+export interface CreateManualBetBody {
+  descricao: string;
+  odd_entrada: number;
+  valor_apostado_cents: number;
+  bonus_pct?: number;
+  legs: ManualBetLeg[];
+}
+
+export const createManualBet = (body: CreateManualBetBody) =>
+  apiFetch<{ id: number; is_multi: boolean; requires_manual_confirmation: boolean }>(
+    "/manual-bets",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+
+export const confirmManualBet = (
+  decisionId: number,
+  resultado: "GREEN" | "RED" | "PUSH" | "VOID",
+) =>
+  apiFetch(`/manual-bets/${decisionId}/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ resultado }),
+  });
+
+export const confirmSignalResult = (
+  signalId: number,
+  resultado: "GREEN" | "RED" | "PUSH" | "VOID",
+) =>
+  apiFetch<UserSignalDecision & { id: number; banca_credit: unknown }>(
+    `/signals/${signalId}/decision/confirm`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resultado }),
+    },
+  );
+
+export const updateSignalBonus = (signalId: number, bonus_pct: number) =>
+  apiFetch<UserSignalDecision & { id: number }>(
+    `/signals/${signalId}/decision/bonus`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bonus_pct }),
+    },
+  );
 
 // ─── WhatsApp WAHA health (admin-only) ─────────────────────────
 
@@ -787,6 +899,9 @@ export interface BancaSummary {
   delta_cents?: number;
   delta_pct?: number;
   unit_pct?: number;
+  total_unidades?: number;
+  unit_value_cents?: number;
+  unidades_disponiveis?: number;
   max_loss_per_day_cents?: number;
   max_bets_per_day?: number;
   stats?: BancaStats;
@@ -837,6 +952,7 @@ export const fetchBancaMovements = (params: {
 export interface SetupBancaPayload {
   initial_cents: number;
   unit_pct?: number;
+  total_unidades?: number;
   max_loss_per_day_cents?: number;
   max_bets_per_day?: number;
 }
@@ -846,6 +962,13 @@ export const setupBanca = (body: SetupBancaPayload) =>
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+  });
+
+export const updateBancaUnits = (total_unidades: number) =>
+  apiFetch<BancaSummary>("/banca/units", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ total_unidades }),
   });
 
 export interface AddMovementPayload {

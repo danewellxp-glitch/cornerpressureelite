@@ -62,7 +62,7 @@ export default function ConfigTab({
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <Card>
                 <CardContent sx={{ p: 2.5 }}>
-                    <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 2, color: "#9C6DFF" }}>
+                    <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 2, color: "#6D28D9" }}>
                         Estado do robô
                     </Typography>
                     <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
@@ -87,7 +87,7 @@ export default function ConfigTab({
 
             <Card>
                 <CardContent sx={{ p: 2.5 }}>
-                    <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 2, color: "#00E676" }}>
+                    <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 2, color: "#15A34A" }}>
                         Banca & Risco
                     </Typography>
                     <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, 1fr)" }, gap: 2 }}>
@@ -129,7 +129,7 @@ export default function ConfigTab({
 
             <Card>
                 <CardContent sx={{ p: 2.5 }}>
-                    <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 2, color: "#00B0FF" }}>
+                    <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 2, color: "#0277BD" }}>
                         Mercados permitidos
                     </Typography>
                     <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
@@ -142,9 +142,9 @@ export default function ConfigTab({
                                 sx={{
                                     fontWeight: 700,
                                     border: "1px solid",
-                                    borderColor: allowedMarkets.includes(m.id) ? "#00B0FF" : "rgba(255,255,255,0.15)",
-                                    bgcolor: allowedMarkets.includes(m.id) ? "rgba(0,176,255,0.2)" : "transparent",
-                                    color: allowedMarkets.includes(m.id) ? "#00B0FF" : "text.secondary",
+                                    borderColor: allowedMarkets.includes(m.id) ? "#0277BD" : "rgba(31,27,22,0.15)",
+                                    bgcolor: allowedMarkets.includes(m.id) ? "rgba(2,119,189,0.14)" : "transparent",
+                                    color: allowedMarkets.includes(m.id) ? "#0277BD" : "text.secondary",
                                 }}
                             />
                         ))}

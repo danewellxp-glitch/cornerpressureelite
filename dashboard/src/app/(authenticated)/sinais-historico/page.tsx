@@ -24,8 +24,13 @@ import { useStrategyPreference } from "@/lib/useStrategyPreference";
 import { fetchSignalsList, type SignalDetail } from "@/lib/api";
 import { fmtDateTime, fmtUnits, cn } from "@/lib/format";
 
-type ResultFilter = "all" | "GREEN" | "RED" | "PENDENTE";
+type ResultFilter = "all" | "GREEN" | "RED";
 type MarketFilter = "all" | "ESCANTEIOS" | "CARTOES";
+
+// Histórico = acertividade do sistema. Só conta sinais com veredito definitivo
+// (GREEN/RED). Pendente, vazio e EXPIRADO não têm acertividade → ficam de fora.
+const isResolved = (r: string | null | undefined): r is "GREEN" | "RED" =>
+    r === "GREEN" || r === "RED";
 
 export default function SinaisHistoricoPage() {
     const { preference } = useStrategyPreference();
@@ -57,14 +62,23 @@ export default function SinaisHistoricoPage() {
     const [q, setQ] = useState("");
     const [onlyMyStrategy, setOnlyMyStrategy] = useState(true);
 
+    // Sinais ainda sem veredito (aguardando FT / EXPIRADO / vazio) — não entram
+    // no histórico de acertividade, só mostramos a contagem pra transparência.
+    const pendingCount = useMemo(
+        () => signals.filter((s) => !isResolved(s.resultado)).length,
+        [signals],
+    );
+
     const all = useMemo(
         () =>
-            signals.map((s) => {
-                const market: Market = (s.tipo_analise || "").toUpperCase() === "CARTOES" ? "cards" : "corners";
-                const userTier = market === "cards" ? preference.cards : preference.corners;
-                const matched = ((s.matching_tiers || []).filter(isValidTier)) as StrategyTier[];
-                return { signal: s, market, userTier, matched };
-            }),
+            signals
+                .filter((s) => isResolved(s.resultado))
+                .map((s) => {
+                    const market: Market = (s.tipo_analise || "").toUpperCase() === "CARTOES" ? "cards" : "corners";
+                    const userTier = market === "cards" ? preference.cards : preference.corners;
+                    const matched = ((s.matching_tiers || []).filter(isValidTier)) as StrategyTier[];
+                    return { signal: s, market, userTier, matched };
+                }),
         [signals, preference],
     );
 
@@ -78,7 +92,6 @@ export default function SinaisHistoricoPage() {
                 }
                 if (result === "GREEN" && signal.resultado !== "GREEN") return false;
                 if (result === "RED" && signal.resultado !== "RED") return false;
-                if (result === "PENDENTE" && signal.resultado && signal.resultado !== "PENDENTE") return false;
                 if (q && !(signal.jogo_descricao || "").toLowerCase().includes(q.toLowerCase())) return false;
                 return true;
             }),
@@ -120,7 +133,14 @@ export default function SinaisHistoricoPage() {
                         Sinais
                     </h1>
                     <p className="text-sm text-muted-foreground mt-1 max-w-xl">
-                        Últimos sinais de todos os mercados — escanteios e cartões — auditados pela sua estratégia.
+                        Acertividade do sistema: todo sinal já resolvido (GREEN/RED), independente de
+                        você ter entrado ou não.
+                        {pendingCount > 0 && (
+                            <span className="block font-mono text-[11px] text-muted-foreground/70 mt-1">
+                                {pendingCount} sinal{pendingCount > 1 ? "s" : ""} ainda aguardando
+                                resultado — não conta na acertividade.
+                            </span>
+                        )}
                     </p>
                 </div>
                 <div className="flex items-center gap-2 text-[10px] font-mono tracking-wider text-muted-foreground">
@@ -130,7 +150,7 @@ export default function SinaisHistoricoPage() {
             </header>
 
             <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <Kpi label="Sinais (filtro)" value={stats.total} icon={Activity} tone="mint" />
+                <Kpi label="Sinais resolvidos" value={stats.total} icon={Activity} tone="mint" />
                 <Kpi label="Greens" value={stats.greens} sub={`${stats.reds} reds`} icon={CheckCircle2} tone="success" />
                 <Kpi
                     label="Winrate"
@@ -189,7 +209,6 @@ export default function SinaisHistoricoPage() {
                                 { v: "all", label: "—" },
                                 { v: "GREEN", label: "Green", cls: "data-[on=true]:text-success" },
                                 { v: "RED", label: "Red", cls: "data-[on=true]:text-destructive" },
-                                { v: "PENDENTE", label: "Pend.", cls: "data-[on=true]:text-warning" },
                             ]}
                         />
                     </div>

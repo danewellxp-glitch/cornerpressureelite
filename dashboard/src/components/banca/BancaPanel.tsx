@@ -10,6 +10,7 @@ import {
     Minus,
     RotateCcw,
     Pencil,
+    Layers,
 } from "lucide-react";
 import {
     ResponsiveContainer,
@@ -28,6 +29,7 @@ import {
     deleteBanca,
     addBancaMovement,
     resetBanca,
+    updateBancaUnits,
     type BancaSummary,
     type BancaMovement,
     type BancaSeriesPoint,
@@ -54,7 +56,7 @@ function brl(cents: number | null | undefined): string {
     });
 }
 
-type ModalKind = "deposit" | "withdraw" | "correction" | "reset" | "edit_initial" | "delete_all" | null;
+type ModalKind = "deposit" | "withdraw" | "correction" | "reset" | "edit_initial" | "delete_all" | "units" | null;
 
 export default function BancaPanel() {
     const [summary, setSummary] = useState<BancaSummary | null>(null);
@@ -200,6 +202,9 @@ export default function BancaPanel() {
                 </div>
             </section>
 
+            {/* Sistema de Unidades */}
+            <UnitsCard summary={summary} onEdit={() => setModal("units")} />
+
             {/* Métricas */}
             {stats && (
                 <section className="grid gap-3 grid-cols-2 lg:grid-cols-5">
@@ -232,19 +237,19 @@ export default function BancaPanel() {
                             <AreaChart data={series.map((p) => ({ ...p, saldo: p.saldo_cents / 100 }))} margin={{ left: -10, right: 8, top: 5, bottom: 0 }}>
                                 <defs>
                                     <linearGradient id="bancaGrad" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="0%" stopColor="oklch(0.62 0.22 255)" stopOpacity={0.4} />
-                                        <stop offset="100%" stopColor="oklch(0.62 0.22 255)" stopOpacity={0} />
+                                        <stop offset="0%" stopColor="#34d399" stopOpacity={0.4} />
+                                        <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
                                     </linearGradient>
                                 </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.30 0.03 220 / 0.3)" />
+                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                                 <XAxis
                                     dataKey="dia"
-                                    stroke="oklch(0.70 0.02 200)"
+                                    stroke="#8b93a3"
                                     tick={{ fontSize: 10, fontFamily: "JetBrains Mono" }}
                                     tickFormatter={(v: string) => v.slice(5)}
                                 />
                                 <YAxis
-                                    stroke="oklch(0.70 0.02 200)"
+                                    stroke="#8b93a3"
                                     tick={{ fontSize: 10, fontFamily: "JetBrains Mono" }}
                                     tickFormatter={(v: number) =>
                                         v.toLocaleString("pt-BR", { maximumFractionDigits: 0 })
@@ -252,11 +257,13 @@ export default function BancaPanel() {
                                 />
                                 <RTooltip
                                     contentStyle={{
-                                        background: "oklch(0.20 0.028 232)",
-                                        border: "1px solid oklch(0.62 0.22 255 / 0.4)",
+                                        background: "#2a2a2a",
+                                        border: "1px solid rgba(52,211,153,0.35)",
                                         borderRadius: 12,
                                         fontSize: 12,
                                         fontFamily: "JetBrains Mono",
+                                        color: "#e5e7eb",
+                                        boxShadow: "0 6px 20px rgba(0,0,0,0.5)",
                                     }}
                                     formatter={(v) => [
                                         typeof v === "number"
@@ -271,7 +278,7 @@ export default function BancaPanel() {
                                 <Area
                                     type="monotone"
                                     dataKey="saldo"
-                                    stroke="oklch(0.74 0.18 235)"
+                                    stroke="#34d399"
                                     strokeWidth={2}
                                     fill="url(#bancaGrad)"
                                 />
@@ -357,7 +364,18 @@ export default function BancaPanel() {
                 </div>
             </section>
 
-            {modal && (
+            {modal === "units" && (
+                <UnitsModal
+                    summary={summary}
+                    onClose={() => setModal(null)}
+                    onDone={async () => {
+                        setModal(null);
+                        await loadAll();
+                    }}
+                />
+            )}
+
+            {modal && modal !== "units" && (
                 <MovementModal
                     kind={modal}
                     saldoCents={summary.banca_atual_cents}
@@ -368,6 +386,213 @@ export default function BancaPanel() {
                     }}
                 />
             )}
+        </div>
+    );
+}
+
+function UnitsCard({
+    summary,
+    onEdit,
+}: {
+    summary: BancaSummary;
+    onEdit: () => void;
+}) {
+    const total = summary.total_unidades ?? 100;
+    const unitValue = summary.unit_value_cents ?? 0;
+    const disponiveis = summary.unidades_disponiveis ?? 0;
+
+    // Tabela de previsão de stake por unidades (1u, 2u, 3u, 5u)
+    const previsao = [1, 2, 3, 5].map((u) => ({ u, cents: unitValue * u }));
+
+    return (
+        <section className="piq-in rounded-2xl border border-mint/20 bg-card p-5">
+            <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                    <div className="flex items-center gap-2">
+                        <Layers className="size-4 text-mint-bright" />
+                        <span className="font-mono text-[10px] tracking-[0.18em] text-mint uppercase">
+                            Sistema de unidades
+                        </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1.5 max-w-xl">
+                        Sua banca dividida em unidades (u). Os sinais sugerem stake em
+                        unidades (ex: &quot;vale 2u&quot;) — assim você sabe quanto apostar sem
+                        fazer conta na hora.
+                    </p>
+                </div>
+                <button
+                    onClick={onEdit}
+                    className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-mint/40 hover:bg-mint/10 text-mint-bright text-xs font-mono tracking-wider transition"
+                >
+                    <Pencil className="size-3" />
+                    REDIVIDIR
+                </button>
+            </div>
+
+            <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+                <div className="rounded-xl border border-border bg-muted/20 p-4">
+                    <div className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
+                        Dividida em
+                    </div>
+                    <div className="font-display text-2xl font-bold tabular mt-1">
+                        {total}
+                        <span className="text-base text-muted-foreground ml-1">u</span>
+                    </div>
+                </div>
+                <div className="rounded-xl border border-mint/30 bg-mint/5 p-4">
+                    <div className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
+                        Valor de 1u
+                    </div>
+                    <div className="font-display text-2xl font-bold tabular mt-1 text-mint-bright">
+                        {brl(unitValue)}
+                    </div>
+                </div>
+                <div className="rounded-xl border border-border bg-muted/20 p-4">
+                    <div className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
+                        Unidades disponíveis
+                    </div>
+                    <div className="font-display text-2xl font-bold tabular mt-1">
+                        {disponiveis}
+                        <span className="text-base text-muted-foreground ml-1">u</span>
+                    </div>
+                </div>
+                <div className="rounded-xl border border-border bg-muted/20 p-4">
+                    <div className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
+                        Previsão de stake
+                    </div>
+                    <div className="mt-1.5 space-y-0.5 font-mono text-xs tabular">
+                        {previsao.map(({ u, cents }) => (
+                            <div key={u} className="flex items-center justify-between gap-2">
+                                <span className="text-muted-foreground">{u}u</span>
+                                <span className="text-foreground">{brl(cents)}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+}
+
+function UnitsModal({
+    summary,
+    onClose,
+    onDone,
+}: {
+    summary: BancaSummary;
+    onClose: () => void;
+    onDone: () => void;
+}) {
+    const [val, setVal] = useState(String(summary.total_unidades ?? 100));
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState<string | null>(null);
+
+    const n = parseInt(val, 10);
+    const preview =
+        Number.isFinite(n) && n > 0
+            ? Math.floor(summary.banca_atual_cents / n)
+            : 0;
+
+    const submit = async () => {
+        if (!Number.isFinite(n) || n <= 0 || n > 10000) {
+            setErr("Número de unidades deve estar entre 1 e 10000");
+            return;
+        }
+        setBusy(true);
+        setErr(null);
+        try {
+            await updateBancaUnits(n);
+            onDone();
+        } catch (e) {
+            setErr(e instanceof Error ? e.message : "Erro ao atualizar unidades");
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div
+            className="fixed inset-0 z-50 grid place-items-center bg-background/80 backdrop-blur-sm p-4"
+            onClick={() => !busy && onClose()}
+        >
+            <div
+                className="w-full max-w-md border border-border bg-card p-6 space-y-5 rounded-2xl"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div>
+                    <div className="flex items-center gap-2 font-mono text-[10px] tracking-[0.22em] uppercase text-mint mb-2">
+                        <Layers className="size-3.5" />
+                        redividir banca em unidades
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                        Em quantas unidades você quer dividir sua banca de{" "}
+                        <strong>{brl(summary.banca_atual_cents)}</strong>? Padrão é 100u
+                        (cada unidade = 1% da banca).
+                    </p>
+                </div>
+
+                <label className="block">
+                    <span className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
+                        Total de unidades
+                    </span>
+                    <input
+                        type="number"
+                        min="1"
+                        max="10000"
+                        step="1"
+                        value={val}
+                        onChange={(e) => setVal(e.target.value)}
+                        className="mt-1 w-full bg-input border border-border px-3 py-2 font-mono text-sm tabular focus:outline-none focus:border-mint rounded-lg"
+                        disabled={busy}
+                        autoFocus
+                    />
+                </label>
+
+                <div className="flex gap-2 flex-wrap">
+                    {[20, 50, 100, 200].map((q) => (
+                        <button
+                            key={q}
+                            type="button"
+                            onClick={() => setVal(String(q))}
+                            className={cn(
+                                "px-3 py-1.5 rounded-lg border font-mono text-xs tracking-wider transition",
+                                n === q
+                                    ? "border-mint bg-mint/10 text-mint-bright"
+                                    : "border-border text-muted-foreground hover:text-foreground",
+                            )}
+                        >
+                            {q}u
+                        </button>
+                    ))}
+                </div>
+
+                <div className="rounded-lg border border-mint/30 bg-mint/5 p-3 font-mono text-xs tabular flex items-center justify-between">
+                    <span className="text-muted-foreground">1 unidade valerá</span>
+                    <span className="text-mint-bright font-bold text-base">{brl(preview)}</span>
+                </div>
+
+                {err && (
+                    <div className="text-xs text-destructive border border-destructive/40 bg-destructive/10 p-2 rounded font-mono">
+                        {err}
+                    </div>
+                )}
+
+                <div className="flex gap-2 justify-end">
+                    <button
+                        onClick={onClose}
+                        disabled={busy}
+                        className="px-4 py-2 border border-border font-mono text-xs tracking-wider hover:text-foreground text-muted-foreground transition rounded-lg"
+                    >
+                        CANCELAR
+                    </button>
+                    <button
+                        onClick={submit}
+                        disabled={busy}
+                        className="px-4 py-2 border border-mint bg-mint text-background font-mono text-xs tracking-wider hover:bg-mint-bright transition disabled:opacity-50 rounded-lg"
+                    >
+                        {busy ? "SALVANDO…" : "SALVAR"}
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }
@@ -528,7 +753,7 @@ function MovementModal({
     onClose,
     onDone,
 }: {
-    kind: Exclude<ModalKind, null>;
+    kind: Exclude<ModalKind, null | "units">;
     saldoCents: number;
     onClose: () => void;
     onDone: () => void | Promise<void>;
@@ -545,7 +770,7 @@ function MovementModal({
         };
     }, []);
 
-    const labels: Record<Exclude<ModalKind, null>, { title: string; cta: string; helper?: string }> = {
+    const labels: Record<Exclude<ModalKind, null | "units">, { title: string; cta: string; helper?: string }> = {
         deposit: { title: "Adicionar saldo", cta: "Confirmar depósito" },
         withdraw: { title: "Sacar saldo", cta: "Confirmar saque" },
         correction: { title: "Correção manual", cta: "Aplicar correção", helper: "Use sinal de menos pra subtrair (ex: -50,00)" },

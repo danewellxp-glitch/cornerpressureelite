@@ -104,8 +104,8 @@ export default function RoboPanel({ initialConfig, userName }: Props) {
                         sx={{
                             fontWeight: 800,
                             letterSpacing: "0.05em",
-                            bgcolor: config!.mode === "real" ? "rgba(255,107,0,0.18)" : "rgba(0,176,255,0.18)",
-                            color: config!.mode === "real" ? "#FF6B00" : "#00B0FF",
+                            bgcolor: config!.mode === "real" ? "rgba(255,107,0,0.16)" : "rgba(2,119,189,0.14)",
+                            color: config!.mode === "real" ? "#D9560A" : "#0277BD",
                         }}
                     />
                     <Chip
@@ -113,8 +113,8 @@ export default function RoboPanel({ initialConfig, userName }: Props) {
                         size="small"
                         sx={{
                             fontWeight: 800,
-                            bgcolor: config!.enabled ? "rgba(0,230,118,0.18)" : "rgba(148,163,184,0.18)",
-                            color: config!.enabled ? "#00E676" : "#94A3B8",
+                            bgcolor: config!.enabled ? "rgba(21,163,74,0.14)" : "rgba(100,116,139,0.16)",
+                            color: config!.enabled ? "#15A34A" : "#64748B",
                         }}
                     />
                 </Box>
@@ -130,7 +130,7 @@ export default function RoboPanel({ initialConfig, userName }: Props) {
             <Tabs
                 value={tab}
                 onChange={(_, v) => setTab(v)}
-                sx={{ mb: 3, borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+                sx={{ mb: 3, borderBottom: "1px solid rgba(31,27,22,0.10)" }}
                 variant="scrollable"
                 scrollButtons="auto"
             >
@@ -172,10 +172,10 @@ function BancaBadge({ value, initial }: { value: number; initial: number }) {
             <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.65rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>
                 Banca atual
             </Typography>
-            <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: "monospace", color: "#fff" }}>
+            <Typography variant="h6" sx={{ fontWeight: 800, fontFamily: "monospace", color: "#1F1B16" }}>
                 R$ {(value / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
             </Typography>
-            <Typography variant="caption" sx={{ fontWeight: 700, color: positive ? "#00E676" : "#FF5252" }}>
+            <Typography variant="caption" sx={{ fontWeight: 700, color: positive ? "#15A34A" : "#DC2626" }}>
                 {positive ? "+" : ""}R$ {(delta / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
             </Typography>
         </Box>
@@ -187,7 +187,7 @@ function SkeletonRow() {
         <Grid container spacing={2}>
             {[1, 2, 3].map((i) => (
                 <Grid size={{ xs: 12, md: 4 }} key={i}>
-                    <Skeleton variant="rounded" height={120} sx={{ bgcolor: "rgba(255,255,255,0.04)" }} />
+                    <Skeleton variant="rounded" height={120} sx={{ bgcolor: "rgba(31,27,22,0.06)" }} />
                 </Grid>
             ))}
         </Grid>

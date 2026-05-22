@@ -26,6 +26,7 @@ import { KpiCard } from "@/components/dashboard/KpiCard";
 import { SignalsDrawer } from "@/components/dashboard/SignalsDrawer";
 import { MarketIntelligencePanel } from "@/components/dashboard/MarketIntelligencePanel";
 import { GamesPanel } from "@/components/dashboard/GamesPanel";
+import { DecisionModal } from "@/components/minhas-apostas/DecisionModal";
 import { OnboardingBanner } from "@/components/shell/OnboardingBanner";
 import { useDashboard } from "@/components/shell/Shell";
 import {
@@ -323,34 +324,36 @@ export default function DashboardPage() {
                                 <AreaChart data={chart} margin={{ left: -10, right: 8, top: 5, bottom: 0 }}>
                                     <defs>
                                         <linearGradient id="mintGrad" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stopColor="oklch(0.62 0.22 255)" stopOpacity={0.4} />
-                                            <stop offset="100%" stopColor="oklch(0.62 0.22 255)" stopOpacity={0} />
+                                            <stop offset="0%" stopColor="#34d399" stopOpacity={0.4} />
+                                            <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
                                         </linearGradient>
                                     </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.30 0.03 220 / 0.3)" />
+                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                                     <XAxis
                                         dataKey="name"
-                                        stroke="oklch(0.70 0.02 200)"
+                                        stroke="#8b93a3"
                                         tick={{ fontSize: 10, fontFamily: "JetBrains Mono" }}
                                     />
                                     <YAxis
-                                        stroke="oklch(0.70 0.02 200)"
+                                        stroke="#8b93a3"
                                         tick={{ fontSize: 10, fontFamily: "JetBrains Mono" }}
                                     />
                                     <RTooltip
                                         contentStyle={{
-                                            background: "oklch(0.20 0.028 232)",
-                                            border: "1px solid oklch(0.62 0.22 255 / 0.4)",
+                                            background: "#2a2a2a",
+                                            border: "1px solid rgba(52,211,153,0.35)",
                                             borderRadius: 12,
                                             fontSize: 12,
                                             fontFamily: "JetBrains Mono",
+                                            color: "#e5e7eb",
+                                            boxShadow: "0 6px 20px rgba(0,0,0,0.5)",
                                         }}
-                                        labelStyle={{ color: "oklch(0.70 0.02 200)" }}
+                                        labelStyle={{ color: "#9ca3af" }}
                                     />
                                     <Area
                                         type="monotone"
                                         dataKey="roi"
-                                        stroke="oklch(0.74 0.18 235)"
+                                        stroke="#34d399"
                                         strokeWidth={2}
                                         fill="url(#mintGrad)"
                                     />
@@ -492,7 +495,18 @@ function SignalRow({
             </td>
             <td className="px-4 py-3 text-xs text-muted-foreground">{signal.tipo_sinal}</td>
             <td className="px-4 py-3 text-right font-mono text-xs">
-                {signal.odd?.toFixed(2) ?? "—"}
+                {d.decision === "entered" && d.odd_entrada != null ? (
+                    <span className="inline-flex items-center gap-1 justify-end">
+                        {d.is_multi && (
+                            <span className="text-[8px] tracking-wider text-mint-bright border border-mint/40 rounded px-1 py-px">
+                                MÚLT
+                            </span>
+                        )}
+                        {d.odd_entrada.toFixed(2)}
+                    </span>
+                ) : (
+                    signal.odd?.toFixed(2) ?? "—"
+                )}
             </td>
             <td className="px-4 py-3 text-center">
                 {d.decision === "pending" ? (
@@ -518,7 +532,9 @@ function SignalRow({
                             R$ {((d.valor_apostado_cents ?? 0) / 100).toFixed(2)}
                         </span>
                         <span className="font-mono text-[9px] tracking-wider text-muted-foreground">
-                            @ {d.odd_entrada?.toFixed(2)}
+                            {d.is_multi
+                                ? `MÚLTIPLA · ${d.legs?.length ?? 0} legs @ ${d.odd_entrada?.toFixed(2)}`
+                                : `@ ${d.odd_entrada?.toFixed(2)}`}
                         </span>
                     </div>
                 ) : (
@@ -531,163 +547,6 @@ function SignalRow({
                 <ResultPill r={d.resultado ?? signal.signal_resultado ?? "PENDENTE"} />
             </td>
         </tr>
-    );
-}
-
-/* ──────────────────────────────────────────────────────────────────
- *  DecisionModal — entrar com odd + valor
- * ────────────────────────────────────────────────────────────────── */
-
-function DecisionModal({
-    signal,
-    banca,
-    onClose,
-    onConfirmed,
-}: {
-    signal: UserSignalDetail;
-    banca: BancaSummary | null;
-    onClose: () => void;
-    onConfirmed: () => void;
-}) {
-    const sugestao =
-        banca?.configured && banca.unit_pct
-            ? Math.round((banca.banca_atual_cents * banca.unit_pct) / 100)
-            : 0;
-    const [oddStr, setOddStr] = useState((signal.odd ?? 0).toFixed(2));
-    const [valStr, setValStr] = useState((sugestao / 100).toFixed(2));
-    const [busy, setBusy] = useState(false);
-    const [err, setErr] = useState<string | null>(null);
-
-    useEffect(() => {
-        const handler = (e: KeyboardEvent) => {
-            if (e.key === "Escape" && !busy) onClose();
-        };
-        document.addEventListener("keydown", handler);
-        return () => document.removeEventListener("keydown", handler);
-    }, [busy, onClose]);
-
-    const confirm = async () => {
-        const odd = parseFloat(oddStr);
-        const val = Math.round(parseFloat(valStr) * 100);
-        if (!odd || odd <= 1.0) {
-            setErr("Odd precisa ser > 1.00");
-            return;
-        }
-        if (!val || val <= 0) {
-            setErr("Valor apostado precisa ser > 0");
-            return;
-        }
-        if (banca?.configured && val > banca.banca_atual_cents) {
-            setErr(
-                `Valor maior que saldo (R$ ${(banca.banca_atual_cents / 100).toFixed(2)})`,
-            );
-            return;
-        }
-        setBusy(true);
-        setErr(null);
-        try {
-            await decideSignal(signal.signal_id, {
-                decision: "entered",
-                odd_entrada: odd,
-                valor_apostado_cents: val,
-            });
-            onConfirmed();
-        } catch (e) {
-            setErr(e instanceof Error ? e.message : "Erro ao registrar");
-            setBusy(false);
-        }
-    };
-
-    return (
-        <div
-            className="fixed inset-0 z-50 grid place-items-center bg-background/80 backdrop-blur-sm p-4"
-            onClick={() => !busy && onClose()}
-        >
-            <div
-                className="w-full max-w-md border border-border bg-card p-6 space-y-5"
-                onClick={(e) => e.stopPropagation()}
-            >
-                <div>
-                    <div className="font-mono text-[10px] tracking-[0.22em] uppercase text-mint mb-2">
-                        registrar entrada
-                    </div>
-                    <h3 className="font-display text-xl font-bold leading-tight">
-                        {signal.jogo_descricao}
-                    </h3>
-                    <p className="text-xs text-muted-foreground mt-1.5 font-mono">
-                        {signal.tipo_sinal} · linha {signal.linha} · score{" "}
-                        {signal.pressure_score} · edge {signal.edge}
-                    </p>
-                </div>
-
-                {!banca?.configured && (
-                    <div className="text-xs text-warning border border-warning/40 bg-warning/10 p-2 rounded">
-                        Banca não configurada — entrada vai contar pro ROI mas o saldo da banca não vai debitar.
-                    </div>
-                )}
-
-                <div className="space-y-3">
-                    <label className="block">
-                        <span className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
-                            Odd pega
-                        </span>
-                        <input
-                            type="number"
-                            step="0.01"
-                            min="1.01"
-                            value={oddStr}
-                            onChange={(e) => setOddStr(e.target.value)}
-                            className="mt-1 w-full bg-input border border-border px-3 py-2 font-mono text-sm tabular focus:outline-none focus:border-mint"
-                            disabled={busy}
-                        />
-                    </label>
-                    <label className="block">
-                        <span className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
-                            Valor (R$)
-                        </span>
-                        <input
-                            type="number"
-                            step="0.01"
-                            min="0.01"
-                            value={valStr}
-                            onChange={(e) => setValStr(e.target.value)}
-                            className="mt-1 w-full bg-input border border-border px-3 py-2 font-mono text-sm tabular focus:outline-none focus:border-mint"
-                            disabled={busy}
-                        />
-                        {banca?.configured && (
-                            <span className="font-mono text-[10px] text-muted-foreground mt-1 block">
-                                saldo: R$ {(banca.banca_atual_cents / 100).toFixed(2)}
-                                {banca.unit_pct &&
-                                    ` · sugestão ${banca.unit_pct}% = R$ ${(sugestao / 100).toFixed(2)}`}
-                            </span>
-                        )}
-                    </label>
-                </div>
-
-                {err && (
-                    <div className="text-xs text-destructive border border-destructive/40 bg-destructive/10 p-2 rounded font-mono">
-                        {err}
-                    </div>
-                )}
-
-                <div className="flex gap-2 justify-end">
-                    <button
-                        onClick={onClose}
-                        disabled={busy}
-                        className="px-4 py-2 border border-border font-mono text-xs tracking-wider hover:text-foreground text-muted-foreground transition"
-                    >
-                        CANCELAR
-                    </button>
-                    <button
-                        onClick={confirm}
-                        disabled={busy}
-                        className="px-4 py-2 border border-mint bg-mint text-background font-mono text-xs tracking-wider hover:bg-mint-bright transition disabled:opacity-50"
-                    >
-                        {busy ? "REGISTRANDO…" : "CONFIRMAR ENTRADA"}
-                    </button>
-                </div>
-            </div>
-        </div>
     );
 }
 
