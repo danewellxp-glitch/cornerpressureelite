@@ -50,6 +50,7 @@ Regras completas em [/CLAUDE.md §12](../CLAUDE.md).
 | [architecture/playwright-anti-bot-checklist.md](architecture/playwright-anti-bot-checklist.md) | **Defesas contra Cloudflare Bot Management** — sinais que disparam flag, código defensivo, checklist pré-sessão |
 | [architecture/upcoming-games-polling.md](architecture/upcoming-games-polling.md) | Polling adaptativo |
 | [architecture/waha-webhook-architecture.md](architecture/waha-webhook-architecture.md) | Webhook PUSH do WAHA Plus |
+| [architecture/sinais-valor-vision.md](architecture/sinais-valor-vision.md) | **Visão Sinais Valor (futuro — Fase H_VALOR)** — categoria nova multi-mercado, 3 pilares (Histórico/Contexto/Live), modelos LightGBM, decisões do Daniel. ON HOLD. |
 | [api/ENDPOINTS.md](api/ENDPOINTS.md) | Referência da API REST |
 
 ---

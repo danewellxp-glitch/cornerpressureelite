@@ -637,3 +637,49 @@ Detalhe de fases no `docs/ROADMAP.md`. Estado do código (tudo **default OFF**):
 - **`SOFASCORE_DISCOVERY_ENABLED`** — liga o **shadow discovery**: `main.py::_shadow_discovery_compare` roda `data/providers/sofascore/discovery.py::discover_scheduled` em paralelo ao AF e loga `[A2-SHADOW]` (matched/af_only/sofa_only) via `compare_coverage` (fuzzy ratio médio ≥85, restrito à mesma liga). **NÃO muda o que é monitorado** — só mede o que o cutover ganharia/perderia. É a fonte de validação antes de promover o discovery a fonte real. Como observar: `docs/OPERATIONS.md` (A2 shadow).
 - **`SOFASCORE_WS_ENABLED`** — liga o feed WebSocket NATS (`ws_client.py::SofaScoreLiveFeed`, firehose `sport.football`). `main.py::_ws_settle_loop` dispara settle imediato no FT (substitui o cold-check de 2h via AF). NÃO traz stats (escanteios/posse) — só placar/status/FT/cardsCode.
 - **Ainda navega por `fixture_id` AF**: promover discovery a *fonte* da agenda depende de promover `sofa_event_id` a chave de leitura (acoplado). Por isso o shadow primeiro.
+
+---
+
+## 14. Sinais Valor (futuro — Fase H_VALOR, ON HOLD)
+
+> Categoria de sinais **ainda NÃO implementada**. Visão mestre completa em
+> `docs/architecture/sinais-valor-vision.md`; roadmap de fases no `docs/ROADMAP.md`
+> (H_VALOR.0→.4); ADR em `docs/DECISIONS.md` (2026-05-22). Esta seção é o resumo
+> que um agente precisa antes de tocar no assunto. (Numerada §14 — o original pedia
+> §15, mas a última seção era §13.)
+
+### Conceito
+
+Apostas de alto valor estatístico em **múltiplos mercados** (1X2, BTTS, Over/Under,
+AH, além de corners/cards), usando o dataset acumulado + modelos ML (LightGBM) pra
+achar brechas reais nas linhas Betano. Sinais raros (1-5/semana), odds 1.40-1.70.
+
+### 3 pilares
+
+1. **Histórico (40%)** — últimos 10 jogos **NA COMPETIÇÃO ESPECÍFICA**, casa vs fora, H2H, formação tática, rotação de elenco.
+2. **Contexto (30%)** — motivação (rebaixamento/G4/decisão), stage do torneio, descanso, próximo jogo importante, lesões, clássico/rivalidade.
+3. **Live (30%, gatilho)** — stats em tempo real (Betano + SofaScore), momentum, pressão acumulada.
+
+### Regras de negócio (decisões Daniel — ver DECISIONS.md)
+
+- **Stake:** 20-50% da banca por sinal (risco alto **assumido conscientemente** pelo Daniel; Claude alertou, Daniel manteve).
+- **Odds:** 1.40-1.70 ("linhas maduras"). **Edge mínimo:** 8%.
+- **Modelo:** LightGBM com validação **walk-forward** (não regras determinísticas).
+- **Fontes:** SofaScore (~95%) + Betano bridge + AF residual. **Sem scraping.**
+
+### Invariantes (NÃO violar quando implementar)
+
+- **NÃO misturar competições no histórico** (Brasileirão ≠ Libertadores) — feature por torneio.
+- **NÃO usar scraping** — SofaScore API cobre ~95% (Pilar 1+2).
+- **NÃO emitir** sem edge >8% nem fora da faixa 1.40-1.70.
+- **SEMPRE validar walk-forward** (temporal, sem retrofit) + calibrar probabilidade (prob real, não ranking).
+- Sistema EMITE com `stake_sugerida`; **cliente decide o tamanho real**; comunicação educativa sobre risco, sem promessa de ROI.
+
+### Status e próxima ação
+
+**ON HOLD** aguardando: Fase H A3 completa · V2 Dashboard estável · dataset 4-6 meses ·
+50+ clientes ativos. **Pendências de decisão Daniel:** rankear mercados · confirmar
+tier comercial (Quant Pro R$199,90?) · validar nome final.
+
+> **Próxima ação de engenharia é a Fase H A2 (cutover `sofa_event_id`) — NÃO iniciar
+> H_VALOR.** Quando reativar: começar por H_VALOR.0 (investigação).

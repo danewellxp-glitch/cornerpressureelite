@@ -408,3 +408,35 @@ schema novo + worker + ~15 testes.
 **Implementação:** `data/providers/sofascore/discovery.py::compare_coverage` + `CoverageReport`, `main.py::_shadow_discovery_compare` (chamado em `_fetch_today_schedule`), 8 testes em `tests/providers/sofascore/test_discovery.py`. Ver `docs/OPERATIONS.md` (A2 shadow) e `docs/ROADMAP.md` (A2).
 
 **Status:** ATIVA (shadow disponível, flag OFF — aguarda dias de validação com volume real)
+
+## 2026-05-22 — Sinais Valor: estratégia + estrutura (multi-pilar + ML)
+
+**Status:** Documentado, **ON HOLD** aguardando fundação. Visão mestre completa em `docs/architecture/sinais-valor-vision.md`; regras em `CLAUDE.md` §14; fases em `docs/ROADMAP.md` (H_VALOR).
+
+**Decisão:** Criar nova categoria "Sinais Valor" — apostas de alto valor estatístico em múltiplos mercados (1X2, BTTS, Over/Under, AH, além de corners/cards), via 3 pilares (Histórico 40% + Contexto 30% + Live 30%) e modelos ML (LightGBM). Stake 20-50% banca. Odds 1.40-1.70. Edge mínimo 8%.
+
+**Contexto:** Daniel pediu uma modalidade focada em "alavancagem" (apostas de alto valor em odds confiáveis, reinvestindo ganhos). O sistema atual cobre só corners/cards de forma determinística. O bridge captura 260+ mercados Betano; o enrichment SofaScore dá stats avançados (xG, posse). Falta dataset maduro + modelos quant.
+
+**Alternativas de stake consideradas:**
+- **Kelly Fractional (2-5%)** — RECUSADA pelo Daniel (conservadora, crescimento lento).
+- **Stake fixa por unidades (1u/2u)** — não considerada (padrão tipster, subjetiva).
+- **20-50% banca (DECISÃO Daniel)** — APROVADA. Claude alertou explicitamente: accuracy 65% (realista) + stake 30% ⇒ −67% banca em 20 sinais; profissionais raramente passam de 60% sustentável. Daniel manteve, razão: "odds maduras 1.40-1.70 + alta probabilidade compensam". **Risco alto assumido conscientemente pelo Daniel.**
+
+**Outras decisões:**
+- **Modelo ML (LightGBM) com walk-forward**, não regras fixas — Daniel quer o modelo aprendendo padrões. Fallback heurístico até amadurecer.
+- **Histórico POR COMPETIÇÃO** (não misturar Brasileirão com Libertadores) — invariante crítica.
+- **Sem scraping** — SofaScore API cobre ~95% (Pilar 1+2).
+
+**Implicações:**
+- Sistema sinaliza com `stake_sugerida`; cliente decide o tamanho real. Comunicação educativa sobre risco, tracking transparente, sem promessa de ROI.
+- Tier comercial diferenciado (Quant Pro R$199,90 proposto — pendente confirmação Daniel).
+
+**Riscos:** sample bias (→ walk-forward), mercados eficientes / edge raro (→ 1-5 sinais/semana), sobreajuste (→ regularização + re-treino), expectativa de ROI irreal (→ educação), streak de losses agravado pela stake alta (→ bankroll management explícito).
+
+**Pré-requisitos bloqueantes:** Fase H A3 completa · V2 Dashboard estável · dataset 4-6 meses · 50+ clientes ativos.
+
+**Pendências de decisão Daniel (antes de H_VALOR.0):** rankear mercados prioritários · confirmar tier comercial · validar nome final.
+
+**Próxima ação:** NÃO implementar agora — seguir Fase H A2. Captura de dados antecipada (workers leves, ~18h) só pós-A3 estável.
+
+**Status:** DOCUMENTADO / ON HOLD

@@ -169,3 +169,34 @@ Projeta evento futuro (escanteios/cartões/gols) com intervalos de confiança.
 
 ### Fase H4 — Backtest engine
 Roda estratégia hipotética sobre dataset histórico. Calibra parâmetros.
+
+## Fases Quant Avançadas — Sinais Valor (H_VALOR)
+
+**Status:** documentado, **ON HOLD** (aguarda fundação). Visão mestre completa em
+`docs/architecture/sinais-valor-vision.md`; regras no `CLAUDE.md` §14; ADR em
+`docs/DECISIONS.md` (2026-05-22).
+
+Nova categoria de sinais focada em edge matemático sustentável em múltiplos mercados
+(1X2, BTTS, Over/Under, AH, etc), via dataset acumulado + modelos LightGBM. Sinais
+raros (1-5/semana), odds 1.40-1.70 ("linhas maduras"), stake 20-50% banca (decisão
+Daniel — alto risco assumido). 3 pilares: Histórico 40% + Contexto 30% + Live 30%.
+
+- **H_VALOR.0 — Investigação (~6-10h):** catalogar 10-15 mercados Betano, validar cobertura histórica SofaScore, features por pilar, thresholds preliminares.
+- **H_VALOR.1 — Schema + captura (~15-25h):** tabelas novas (`team_form_history`, `team_context_snapshots`, `odds_pre_match_history`, `sinais_valor`, `sinais_valor_features` — renumerar a migration, 0017 está usado) + workers de captura. Dataset começa a acumular.
+- **H_VALOR.2 — Modelo Histórico (~25-40h):** LightGBM por mercado (3-5 inicial), walk-forward, calibração de probabilidade.
+- **H_VALOR.3 — Pilares 2+3 + integração (~30-50h):** modelos Contexto + Live, composição multi-pilar, `SinaisValorEmitter`.
+- **H_VALOR.4 — Backtest + tier comercial (~20-35h):** engine de backtest, dashboard Quant Pro, tier R$199,90 (proposta).
+
+**TOTAL:** ~95-160h em 6-12 meses.
+
+**Pré-requisitos bloqueantes:** Fase H A3 completa (`sofa_event_id` chave única) ·
+V2 Dashboard estável · dataset 4-6 meses · 50+ clientes Pro/Max ativos.
+
+**Pendências de decisão Daniel (antes de H_VALOR.0):** rankear mercados prioritários ·
+confirmar tier comercial · validar nome final.
+
+**Captura de dados antecipada (~18h, opcional):** workers leves de pre-match odds +
+team form + contexto podem começar em paralelo — **mas só pós-A3 estável**. Não é
+"em progresso": é candidato a iniciar depois que o cutover `sofa_event_id` fechar.
+
+> **Próxima ação de engenharia continua sendo Fase H A2** — não tocar H_VALOR ainda.
