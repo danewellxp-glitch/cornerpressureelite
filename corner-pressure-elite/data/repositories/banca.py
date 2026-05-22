@@ -24,8 +24,8 @@ class BancaRepo:
             row = await conn.fetchrow(
                 """
                 SELECT banca_inicial_cents, banca_atual_cents, currency,
-                       unit_pct, max_loss_per_day_cents, max_bets_per_day,
-                       started_at, updated_at
+                       unit_pct, total_unidades, max_loss_per_day_cents,
+                       max_bets_per_day, started_at, updated_at
                 FROM banca WHERE user_id = $1
                 """,
                 user_id,
@@ -36,6 +36,11 @@ class BancaRepo:
         atual = int(row["banca_atual_cents"])
         delta = atual - inicial
         delta_pct = (delta / inicial * 100.0) if inicial > 0 else 0.0
+        total_unidades = int(row["total_unidades"]) if row["total_unidades"] is not None else 100
+        # 1u em centavos = banca_atual / total_unidades (integer math, truncamento).
+        unit_value_cents = atual // total_unidades if total_unidades > 0 else 0
+        # Unidades disponiveis no saldo atual (pode ser != total_unidades se ja apostou).
+        unidades_disponiveis = atual // unit_value_cents if unit_value_cents > 0 else 0
         return {
             "configured": True,
             "banca_inicial_cents": inicial,
@@ -44,6 +49,9 @@ class BancaRepo:
             "delta_pct": round(delta_pct, 2),
             "currency": row["currency"],
             "unit_pct": float(row["unit_pct"]) if row["unit_pct"] is not None else None,
+            "total_unidades": total_unidades,
+            "unit_value_cents": unit_value_cents,
+            "unidades_disponiveis": unidades_disponiveis,
             "max_loss_per_day_cents": row["max_loss_per_day_cents"],
             "max_bets_per_day": row["max_bets_per_day"],
             "stats": await self._compute_stats(user_id),
@@ -56,8 +64,11 @@ class BancaRepo:
                 """
                 SELECT
                   COUNT(*) FILTER (WHERE tipo = 'bet_win') AS wins,
-                  COUNT(*) FILTER (WHERE tipo = 'bet_loss') AS losses,
-                  COALESCE(SUM(valor_cents) FILTER (WHERE tipo IN ('bet_win', 'bet_loss')), 0) AS pnl,
+                  COUNT(*) FILTER (WHERE tipo = 'bet_loss' AND NOT EXISTS (
+                    SELECT 1 FROM banca_movements bw
+                    WHERE bw.bet_id = banca_movements.bet_id AND bw.tipo IN ('bet_win', 'bet_void')
+                  )) AS losses,
+                  COALESCE(SUM(valor_cents) FILTER (WHERE tipo IN ('bet_win', 'bet_loss', 'bet_void')), 0) AS pnl,
                   COALESCE(SUM(-valor_cents) FILTER (WHERE tipo = 'bet_loss'), 0) AS staked_losses,
                   COALESCE(SUM(valor_cents) FILTER (WHERE tipo = 'bet_win'), 0) AS payout_wins
                 FROM banca_movements WHERE user_id = $1
@@ -81,32 +92,53 @@ class BancaRepo:
             "max_drawdown_cents": 0,  # TODO: rolar series
         }
 
+    async def update_unidades(self, user_id: int, *, total_unidades: int) -> dict:
+        """Redefine numero de unidades em que a banca esta dividida.
+
+        Nao mexe em saldo nem outros parametros — so muda a granularidade pra
+        calculo de stake. Idempotente.
+        """
+        if total_unidades <= 0 or total_unidades > 10_000:
+            raise ValueError("total_unidades deve estar entre 1 e 10000")
+        async with self._pool.acquire() as conn:
+            res = await conn.execute(
+                "UPDATE banca SET total_unidades = $2, updated_at = NOW() WHERE user_id = $1",
+                user_id, total_unidades,
+            )
+        if res.endswith("0"):
+            raise LookupError("banca nao configurada")
+        return await self.get_summary(user_id)  # type: ignore[return-value]
+
     async def setup(
         self,
         user_id: int,
         *,
         initial_cents: int,
         unit_pct: Optional[float] = None,
+        total_unidades: Optional[int] = None,
         max_loss_per_day_cents: Optional[int] = None,
         max_bets_per_day: Optional[int] = None,
     ) -> dict:
         """Cria ou re-configura a banca. Re-setup PRESERVA saldo atual."""
+        if total_unidades is not None and (total_unidades <= 0 or total_unidades > 10_000):
+            raise ValueError("total_unidades deve estar entre 1 e 10000")
         async with self._pool.acquire() as conn:
             await conn.execute(
                 """
                 INSERT INTO banca (
                     user_id, banca_inicial_cents, banca_atual_cents,
-                    unit_pct, max_loss_per_day_cents, max_bets_per_day
+                    unit_pct, total_unidades, max_loss_per_day_cents, max_bets_per_day
                 )
-                VALUES ($1, $2, $2, $3, $4, $5)
+                VALUES ($1, $2, $2, $3, $4, $5, $6)
                 ON CONFLICT (user_id) DO UPDATE SET
                     banca_inicial_cents = EXCLUDED.banca_inicial_cents,
                     unit_pct = EXCLUDED.unit_pct,
+                    total_unidades = COALESCE(EXCLUDED.total_unidades, banca.total_unidades),
                     max_loss_per_day_cents = EXCLUDED.max_loss_per_day_cents,
                     max_bets_per_day = EXCLUDED.max_bets_per_day,
                     updated_at = NOW()
                 """,
-                user_id, initial_cents, unit_pct, max_loss_per_day_cents, max_bets_per_day,
+                user_id, initial_cents, unit_pct, total_unidades, max_loss_per_day_cents, max_bets_per_day,
             )
         return await self.get_summary(user_id)  # type: ignore[return-value]
 
@@ -160,6 +192,85 @@ class BancaRepo:
                 user_id, saldo_novo,
             )
         return {"movement_id": int(mov_id), "saldo_apos_cents": saldo_novo}
+
+    async def credit_payout(
+        self,
+        user_id: int,
+        *,
+        decision_id: int,
+        stake_cents: int,
+        payout_cents: int,
+        bonus_cents: int,
+        resultado: str,
+        signal_id: Optional[int] = None,
+        label: Optional[str] = None,
+    ) -> Optional[dict]:
+        """Credita banca apos settle de uma decision. Idempotente por decision_id.
+
+        Convencao:
+        - GREEN: payout_cents = lucro liquido (stake*(odd-1)+bonus). Banca recebe
+          bet_win com +(stake + payout_cents) — estorna stake do bet_loss inicial
+          + adiciona lucro (que ja inclui bonus snapshot em payout_cents).
+        - RED: nada (bet_loss inicial ja registrou a perda).
+        - PUSH/VOID: bet_win com +stake (so estorna).
+
+        Idempotente: se ja existe bet_win/bet_void pra esse decision_id, no-op.
+        """
+        if resultado not in {"GREEN", "RED", "PUSH", "VOID"}:
+            raise ValueError(f"resultado invalido: {resultado}")
+
+        async with self._pool.acquire() as conn, conn.transaction():
+            existing = await conn.fetchval(
+                """
+                SELECT 1 FROM banca_movements
+                WHERE bet_id = $1 AND tipo IN ('bet_win', 'bet_void')
+                LIMIT 1
+                """,
+                decision_id,
+            )
+            if existing:
+                log.info(f"credit_payout decision {decision_id}: ja creditado, no-op")
+                return None
+
+            if resultado == "RED":
+                return None  # bet_loss inicial ja debitou stake; nada a fazer
+
+            ref = label or f"signal #{signal_id}"
+            if resultado == "GREEN":
+                credit = stake_cents + payout_cents
+                mov_tipo = "bet_win"
+                desc = f"Payout {ref} (stake R${stake_cents/100:.2f} + lucro R${payout_cents/100:.2f})"
+                if bonus_cents > 0:
+                    desc += f" inclui bonus R${bonus_cents/100:.2f}"
+            else:  # PUSH/VOID
+                credit = stake_cents
+                mov_tipo = "bet_void"
+                desc = f"Estorno {resultado} {ref}"
+
+            row = await conn.fetchrow(
+                "SELECT banca_atual_cents FROM banca WHERE user_id = $1 FOR UPDATE",
+                user_id,
+            )
+            if not row:
+                raise LookupError("banca nao configurada")
+            saldo_atual = int(row["banca_atual_cents"])
+            saldo_novo = saldo_atual + credit
+
+            mov_id = await conn.fetchval(
+                """
+                INSERT INTO banca_movements (
+                    user_id, tipo, valor_cents, bet_id, descricao, motivo, saldo_apos_cents
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id
+                """,
+                user_id, mov_tipo, credit, decision_id, desc, f"settle_{resultado}", saldo_novo,
+            )
+            await conn.execute(
+                "UPDATE banca SET banca_atual_cents = $2, updated_at = NOW() WHERE user_id = $1",
+                user_id, saldo_novo,
+            )
+        return {"movement_id": int(mov_id), "saldo_apos_cents": saldo_novo, "credit_cents": credit}
 
     async def list_movements(
         self,

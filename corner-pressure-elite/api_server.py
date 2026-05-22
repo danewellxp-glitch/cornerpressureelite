@@ -2158,13 +2158,39 @@ async def api_banca_setup(
     if initial <= 0:
         raise HTTPException(400, "initial_cents > 0 obrigatorio")
     repo = await _get_banca_repo()
-    return await repo.setup(
-        current_user.id,
-        initial_cents=initial,
-        unit_pct=body.get("unit_pct"),
-        max_loss_per_day_cents=body.get("max_loss_per_day_cents"),
-        max_bets_per_day=body.get("max_bets_per_day"),
-    )
+    try:
+        return await repo.setup(
+            current_user.id,
+            initial_cents=initial,
+            unit_pct=body.get("unit_pct"),
+            total_unidades=body.get("total_unidades"),
+            max_loss_per_day_cents=body.get("max_loss_per_day_cents"),
+            max_bets_per_day=body.get("max_bets_per_day"),
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.patch("/api/banca/units")
+async def api_banca_units(
+    body: dict,
+    current_user: User = Depends(require_paid_subscription),
+):
+    """Atualiza so total_unidades. Nao mexe em saldo nem outros parametros."""
+    total = body.get("total_unidades")
+    if total is None:
+        raise HTTPException(400, "total_unidades obrigatorio")
+    try:
+        total = int(total)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "total_unidades deve ser int")
+    repo = await _get_banca_repo()
+    try:
+        return await repo.update_unidades(current_user.id, total_unidades=total)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except LookupError:
+        raise HTTPException(409, "banca nao configurada")
 
 
 @app.post("/api/banca/movements")
@@ -2235,7 +2261,12 @@ async def api_signal_decide(
     body: dict,
     current_user: User = Depends(require_paid_subscription),
 ):
-    """Marca decisao do user sobre um sinal: entered (com odd+valor) ou skipped."""
+    """Marca decisao do user sobre um sinal: entered (com odd+valor) ou skipped.
+
+    Sprint M.2: body aceita legs (lista de mercados pra multi) e bonus_pct.
+    Se legs tem 2+ itens, decision e marcada is_multi=true e
+    requires_manual_confirmation=true (CPES nao consegue auto-settle multi).
+    """
     decision = body.get("decision")
     if decision not in {"entered", "skipped"}:
         raise HTTPException(400, "decision deve ser 'entered' ou 'skipped'")
@@ -2247,30 +2278,215 @@ async def api_signal_decide(
             decision=decision,
             odd_entrada=body.get("odd_entrada"),
             valor_apostado_cents=body.get("valor_apostado_cents"),
+            bonus_pct=body.get("bonus_pct"),
+            legs=body.get("legs"),
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    # Se entered, gera movimento de stake na banca (debita pra "reservar").
-    # Movement bet_loss negativo de stake; se resultado vier GREEN depois,
-    # geramos bet_win positivo com payout. Garantia atomica fica no settle().
+    # Se entered, gera bet_loss otimista (stake reservation). Idempotente por bet_id.
     if decision == "entered":
+        log = logging.getLogger("cpes.api.decision")
         try:
             banca_repo = await _get_banca_repo()
-            await banca_repo.add_movement(
-                current_user.id,
-                tipo="bet_loss",   # debita stake (otimista; settle compensa em GREEN)
-                valor_cents=-(body.get("valor_apostado_cents") or 0),
-                bet_id=result["id"],
-                descricao=f"Stake signal #{signal_id}",
-                motivo="entered",
-            )
+            db = Database()
+            async with db.pool.acquire() as conn:
+                already = await conn.fetchval(
+                    "SELECT 1 FROM banca_movements WHERE bet_id = $1 AND tipo = 'bet_loss' LIMIT 1",
+                    result["id"],
+                )
+            if already:
+                log.info(f"user {current_user.id} re-decide signal {signal_id} (decision_id={result['id']}) — bet_loss ja existe, skip")
+            else:
+                await banca_repo.add_movement(
+                    current_user.id,
+                    tipo="bet_loss",
+                    valor_cents=-(body.get("valor_apostado_cents") or 0),
+                    bet_id=result["id"],
+                    descricao=f"Stake signal #{signal_id}",
+                    motivo="entered",
+                )
         except (LookupError, ValueError) as e:
-            # Banca nao configurada ou saldo insuficiente — decision continua
-            # registrada mas avisa. UI deve mostrar warning.
-            log = logging.getLogger("cpes.api.decision")
             log.warning(f"user {current_user.id} entered signal {signal_id} but banca move falhou: {e}")
     return result
+
+
+@app.post("/api/manual-bets")
+async def api_create_manual_bet(
+    body: dict,
+    current_user: User = Depends(require_paid_subscription),
+):
+    """Cria aposta MANUAL (single/multi) em Minhas Apostas (migration 0017).
+
+    body: {
+      descricao: str,
+      odd_entrada: float,          # odd efetiva (single=odd da leg; multi=produto)
+      valor_apostado_cents: int,
+      bonus_pct?: float,
+      legs: [{mercado, descricao, jogo_id?, linha?, side?, odd_leg}]
+    }
+    Legs escanteios/cartoes com jogo_id+linha+side = auto-settle. Resto = manual confirm.
+    """
+    repo = await _get_decisions_repo()
+    try:
+        result = await repo.create_manual_bet(
+            current_user.id,
+            descricao=body.get("descricao") or "Aposta manual",
+            odd_entrada=body.get("odd_entrada"),
+            valor_apostado_cents=body.get("valor_apostado_cents"),
+            bonus_pct=body.get("bonus_pct"),
+            legs=body.get("legs") or [],
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    # bet_loss otimista (reserva de stake), idempotente por bet_id (mesmo fluxo /decision).
+    log = logging.getLogger("cpes.api.manual_bet")
+    try:
+        banca_repo = await _get_banca_repo()
+        await banca_repo.add_movement(
+            current_user.id,
+            tipo="bet_loss",
+            valor_cents=-(body.get("valor_apostado_cents") or 0),
+            bet_id=result["id"],
+            descricao=f"Stake aposta manual #{result['id']}",
+            motivo="manual_bet",
+        )
+    except (LookupError, ValueError) as e:
+        log.warning(f"user {current_user.id} criou aposta manual {result['id']} mas banca move falhou: {e}")
+    return result
+
+
+@app.post("/api/manual-bets/{decision_id}/confirm")
+async def api_manual_bet_confirm(
+    decision_id: int,
+    body: dict,
+    current_user: User = Depends(require_paid_subscription),
+):
+    """Confirma manualmente o resultado de uma aposta MANUAL (GREEN|RED|PUSH|VOID).
+    Pra apostas que o sistema nao consegue auto-settlar (jogo sem stats, multi)."""
+    resultado = body.get("resultado")
+    if resultado not in {"GREEN", "RED", "PUSH", "VOID"}:
+        raise HTTPException(400, "resultado deve ser GREEN|RED|PUSH|VOID")
+    repo = await _get_decisions_repo()
+    db = Database()
+    async with db.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, valor_apostado_cents, decision FROM user_signal_decisions "
+            "WHERE id = $1 AND user_id = $2 AND is_manual = TRUE",
+            decision_id, current_user.id,
+        )
+    if not row:
+        raise HTTPException(404, "aposta manual nao encontrada")
+    if row["decision"] != "entered":
+        raise HTTPException(409, f"aposta em estado '{row['decision']}'")
+    stake = int(row["valor_apostado_cents"] or 0)
+    try:
+        updated = await repo.confirm_manual_result(decision_id, resultado=resultado)
+    except (ValueError, LookupError) as e:
+        raise HTTPException(400, str(e))
+    banca_repo = await _get_banca_repo()
+    try:
+        await banca_repo.credit_payout(
+            current_user.id, decision_id=decision_id, stake_cents=stake,
+            payout_cents=int(updated.get("payout_cents") or 0),
+            bonus_cents=int(updated.get("bonus_cents") or 0),
+            resultado=resultado, label=f"aposta manual #{decision_id}",
+        )
+    except LookupError:
+        pass
+    return updated
+
+
+@app.post("/api/signals/{signal_id}/decision/confirm")
+async def api_signal_decision_confirm(
+    signal_id: int,
+    body: dict,
+    current_user: User = Depends(require_paid_subscription),
+):
+    """User confirma manualmente resultado (GREEN|RED|PUSH|VOID) da aposta.
+
+    Necessario pra multi-bets (requires_manual_confirmation=true). Tambem pode
+    ser usado pra override de resultado em single bets se CPES errou.
+    Apos confirm, banca e creditada automaticamente.
+    """
+    resultado = body.get("resultado")
+    if resultado not in {"GREEN", "RED", "PUSH", "VOID"}:
+        raise HTTPException(400, "resultado deve ser GREEN|RED|PUSH|VOID")
+
+    repo = await _get_decisions_repo()
+    db = Database()
+    async with db.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, valor_apostado_cents, decision
+            FROM user_signal_decisions
+            WHERE user_id = $1 AND signal_id = $2
+            """,
+            current_user.id, signal_id,
+        )
+    if not row:
+        raise HTTPException(404, "decision nao encontrada")
+    if row["decision"] != "entered":
+        raise HTTPException(409, f"decision esta em estado '{row['decision']}', so confirma 'entered'")
+
+    decision_id = int(row["id"])
+    stake = int(row["valor_apostado_cents"] or 0)
+
+    try:
+        updated = await repo.confirm_manual_result(decision_id, resultado=resultado)
+    except (ValueError, LookupError) as e:
+        raise HTTPException(400, str(e))
+
+    # Credita banca (idempotente)
+    banca_repo = await _get_banca_repo()
+    try:
+        credit = await banca_repo.credit_payout(
+            current_user.id,
+            decision_id=decision_id,
+            stake_cents=stake,
+            payout_cents=int(updated.get("payout_cents") or 0),
+            bonus_cents=int(updated.get("bonus_cents") or 0),
+            resultado=resultado,
+            signal_id=signal_id,
+        )
+    except LookupError:
+        credit = None  # banca nao configurada — ok, so atualiza decision
+    return {**updated, "banca_credit": credit}
+
+
+@app.patch("/api/signals/{signal_id}/decision/bonus")
+async def api_signal_decision_bonus(
+    signal_id: int,
+    body: dict,
+    current_user: User = Depends(require_paid_subscription),
+):
+    """Atualiza bonus_pct (turbinada) de uma decision existente.
+
+    Se decision ja foi resolvida, recalcula bonus_cents. Banca NAO e ajustada
+    automaticamente — pra rebatear bonus retroativo, user reseta + re-credita.
+    """
+    bonus_pct = body.get("bonus_pct")
+    if bonus_pct is None:
+        raise HTTPException(400, "bonus_pct obrigatorio")
+    try:
+        bonus_pct = float(bonus_pct)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "bonus_pct deve ser numerico")
+
+    repo = await _get_decisions_repo()
+    db = Database()
+    async with db.pool.acquire() as conn:
+        decision_id = await conn.fetchval(
+            "SELECT id FROM user_signal_decisions WHERE user_id = $1 AND signal_id = $2",
+            current_user.id, signal_id,
+        )
+    if not decision_id:
+        raise HTTPException(404, "decision nao encontrada")
+    try:
+        return await repo.update_bonus(int(decision_id), bonus_pct=bonus_pct)
+    except (ValueError, LookupError) as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/users/me/stats")
@@ -2285,6 +2501,11 @@ async def api_user_signals(
     limit: int = 100,
     current_user: User = Depends(require_paid_subscription),
 ):
-    """Sinais recentes JOIN com decision do user (cria 'pending' se faltar)."""
+    """Sinais recentes JOIN com decision do user (cria 'pending' se faltar) +
+    apostas MANUAIS do user (is_manual). Mescla os dois ordenado por timestamp desc."""
     repo = await _get_decisions_repo()
-    return await repo.list_signals_with_decision(current_user.id, limit=limit)
+    signals = await repo.list_signals_with_decision(current_user.id, limit=limit)
+    manuais = await repo.list_manual_bets(current_user.id, limit=limit)
+    merged = signals + manuais
+    merged.sort(key=lambda x: x.get("timestamp") or "", reverse=True)
+    return merged
