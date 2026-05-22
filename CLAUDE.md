@@ -576,12 +576,44 @@ Cada user pago agora tem **sua própria banca** e **seu próprio dashboard** bas
 
 **Convenções:** Sinais SÃO globais (gerados por `main.py` → `sinais` table, sem user_id). Decisões PER-USER (via `user_signal_decisions` JOIN). Use sempre `_get_decisions_repo()` quando precisar de stats user-scoped no api_server.
 
-**Pendente:** Wire `UserSignalDecisionsRepo.settle(signal_id, resultado)` no `_verificar_resultados` do `main.py` (quando signal vai GREEN/RED). Sem isso, decisões `entered` ficam eternamente sem `payout_cents`.
+~~**Pendente:** Wire settle no `_verificar_resultados`~~ — **RESOLVIDO na Sprint M.2 (ver §13.16).**
 
 Ver:
 - `docs/CHANGELOG.md` (entrada 2026-05-17 Sprint M)
 - `docs/DECISIONS.md` (opt-in default, banca schema)
 - `docs/BUGS.md` (Banca 404, limit 2000, CF gzip SSE)
+
+### 13.16 Sprint M.2 (2026-05-19): Multi-leg + bonus turbinada + settle automático/manual + unidades
+
+Extensão da Sprint M. **Leia §13.14 primeiro.** Resolve a pendência do settle e adiciona multi-aposta, bonus e sistema de unidades.
+
+**Migrations novas:**
+- `0014_fix_banca_movements_bet_fk.sql` — FK `banca_movements.bet_id` repointada de `bets(id)` legado → `user_signal_decisions(id)`. (Bug: registro de entrada dava 500.)
+- `0015_user_signal_decisions_multi_bonus.sql` — `user_signal_decisions` ganha `bonus_pct`, `bonus_cents`, `is_multi`, `requires_manual_confirmation`, `manually_confirmed_at`. Nova tabela `user_decision_legs(decision_id, ordem, mercado, descricao, linha, odd_leg, resultado)`. 6 mercados: `escanteios|cartoes|gols|1x2|ambas_marcam|custom`.
+- `0016_banca_unidades.sql` — `banca.total_unidades INTEGER DEFAULT 100`.
+
+**Settle (dois caminhos):**
+- **Single bet** (1 leg): auto-settle. `main.py::_verificar_resultados` → `_propagar_settle_decisions(jogo_id, tipo_analise, resultado)` → `UserSignalDecisionsRepo.settle_auto()` (filtra `requires_manual_confirmation=FALSE`) + `BancaRepo.credit_payout()`.
+- **Multi bet** (2+ legs): `requires_manual_confirmation=TRUE`. CPES não conhece mercados extras → user confirma via `POST /api/signals/{id}/decision/confirm {resultado}`. Só então banca credita.
+
+**Cálculo payout (canônico em `UserSignalDecisionsRepo._calc_payout` + `BancaRepo.credit_payout`):**
+- GREEN: `lucro_liq = stake*(odd-1)`; `bonus = lucro_liq * bonus_pct`; `payout_cents = lucro_liq + bonus`; banca recebe `bet_win +(stake + payout_cents)` (estorna o `bet_loss` otimista + lucro).
+- RED: `payout = -stake`; banca sem movimento novo (bet_loss já contou).
+- PUSH/VOID: `payout = 0`; banca `bet_void +stake` (só estorna).
+- `credit_payout` é **idempotente** por `decision_id` (no-op se já existe bet_win/bet_void).
+
+**Unidades:** banca dividida em N (`total_unidades`). `1u = banca_atual_cents / N`. `get_summary` retorna `total_unidades`, `unit_value_cents`, `unidades_disponiveis`. Sugestão de stake `suggestedUnits` (frontend): NORMAL=1u, PREMIUM=2u, +1u se edge≥2.0. Fallback pra `unit_pct` legado se `total_unidades` NULL.
+
+**Endpoints novos:** `POST /api/signals/{id}/decision/confirm`, `PATCH /api/signals/{id}/decision/bonus`, `PATCH /api/banca/units`. `POST /decision` aceita `legs[]` + `bonus_pct`. `POST /banca/setup` aceita `total_unidades`.
+
+**Frontend:** `dashboard/src/components/minhas-apostas/MinhasApostasPanel.tsx` (reescrito — layout estilo Betano: legs por mercado, Aposta/Prêmios/Bonus/Total, `ConfirmResultModal` Ganhou/Perdeu/Push/Void, multi-leg `DecisionModal` com odd combinada + stake em unidades). `dashboard/src/components/banca/BancaPanel.tsx` (card "Sistema de unidades" + modal redividir).
+
+**Cuidados:**
+- `CachedBetanoOddsProvider.name` continua valendo (§13.4) — não confundir.
+- Mudar valor de aposta já registrada NÃO re-ajusta banca (idempotência por bet_id pula re-debit; frontend bloqueia re-edição quando decision ≠ pending).
+- `tabOf()` no frontend usa `decision.resultado` pra escolher aba — multi pendente fica em "Em andamento" com botão CONFIRMAR até user resolver.
+
+Ver `docs/CHANGELOG.md` (Sprint M.2), `docs/DECISIONS.md` (2026-05-19), `docs/BUGS.md` (2026-05-19 FK + settle).
 
 ### 13.15 Pendências conhecidas pós-Fase K
 

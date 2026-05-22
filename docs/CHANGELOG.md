@@ -17,6 +17,104 @@ Próximos passos: (opcional)
 
 ---
 
+## 2026-05-22 — Consolidação de commits + apostas manuais (0017) + redesign dashboard
+
+**Contexto:** Árvore de trabalho tinha ~60 arquivos não-commitados acumulados de sessões anteriores (Sprint M.2 backend, apostas manuais, redesign visual) — código já em produção mas nunca persistido em git. Sessão pediu commitar tudo antes de retomar o A2.
+
+**O que foi feito:**
+
+- **Commits organizados** (docs separados de código, §12): backend money-path (migrations 0014-0017 + banca/decisions/api_server), settle no `main.py`, frontend, docs e tooling.
+
+- **`.gitignore`** — passou a ignorar scratch local (screenshots, `*.har`, `sofascoreeee.json`, `upload-lovable-dashboard/`) e `.mcp.json` (contém credencial RO do Postgres — não versionar).
+
+- **Apostas manuais (migration `0017_manual_bets.sql`)** — feature que faltava no changelog. Reusa `user_signal_decisions` (+ `user_decision_legs`) em vez de tabela nova: `signal_id` vira nullable; decision ganha `is_manual`, `jogo_id`, `descricao`; leg ganha `jogo_id` + `side` (over/under). Modelo uniforme por legs (single = 1 leg). Auto-settle por leg para mercados rastreáveis (escanteios/cartões via placar final cru vs linha/side); legs não-rastreáveis (gols/1X2/...) ou jogo não-monitorado caem em manual confirm. Endpoints `POST /api/manual-bets` + `POST /api/manual-bets/{id}/confirm`; frontend `AddBetModal.tsx`. Migration idempotente, sem DROP de dados de produção.
+
+- **Redesign visual do dashboard** — `theme.ts` + `globals.css` repaginados; páginas `dashboard`/`jogos-ao-vivo`/`performance`/`sinais-historico`, componentes `robo/*` e `SideNav` ajustados. Rota `/settings` legada removida (deslocada na recovery de 05-20); `logs` virou `page.tsx.disabled`.
+
+**Estado final:** árvore limpa (working tree sem WIP solto), todos os commits na branch `feat/remove-af-completely`. Testes focados de banca/settle/payout: 70 passam. (4 falhas pré-existentes em `test_score`/`test_decision` são de calibração de threshold do `score_engine`, não tocado aqui.)
+
+**Próximos passos:** retomar o A2 (cutover `sofa_event_id`) — wire `discovery.discover_scheduled` + `SofaScoreLiveFeed` no loop (ver ROADMAP).
+
+---
+
+## 2026-05-20 — Fase H A1 fix (dual-write bridge) + ligas CONMEBOL + deploy
+
+**Contexto:** Sessão começou por uma dúvida do usuário (status WAHA mostrava AF consumindo 478/7500 — "achei que era só Betano/SofaScore"). Esclarecido que AF segue no discovery/cold-checks por design (§13.1); o "0 jogos/0 sinais" era artefato do `_send_startup_status` (chumba 0/0). Daí o usuário pediu (1) adicionar Libertadores + Sul-Americana, (2) validar a Fase H A1, (3) atacar o gargalo do dual-write.
+
+**O que foi feito:**
+
+- **Ligas CONMEBOL** — Libertadores (AF 13/Sofa tid 384/season 87760) e Sul-Americana (AF 11/Sofa tid 480/season 87770), masculinas senior, season 2026, adicionadas em `config.py` (`LIGAS_MONITORADAS` + `LIGAS_MEDIA_CARTOES`), `SOFASCORE_LEAGUE_MAP` e `populate_team_map.py` (TARGET_LEAGUES). Pós-deploy "Ligas monitoradas" já lista `[..., 13, 11]`.
+
+- **Validação Fase H A1 = NÃO validada** — medido fill de `sofa_event_id` por source: `sofascore`=100%, `bridge_betano`=0% (primário, ~90% do volume). Agregado ~2-10%. Volume baixo (5 fixtures distintos em 2 dias) + tempo ~2,5d (< piso de 3d). Veredito: prematuro pra cutover A2.
+
+- **Fix do gargalo (causa raiz)** — workers do bridge nunca caíam pro resolver live (só lookup no banco da `af_sofa_fixture_map`, vazia pra fixtures bridge-only → chicken-and-egg). Adicionado `FixtureMapRepo.get_by_fixture_id`, `SofaScoreEventResolver.resolve_by_fixture_id`, `AfSofaFixtureMapRepo.get_or_resolve`, e wiring do `event_resolver` nos 3 workers + `main.py`. Validado ao vivo (Torreense vs Casa Pia → sofa 16197899, `realtime_live`). 120 testes dos módulos tocados passam. Ver `docs/BUGS.md` 2026-05-20 (dual-write).
+
+- **Deploy** — `docker compose build main && up -d main`. Boot saudável: workers + SofaScore stack ativos, ligas 13/11 monitoradas.
+
+**Bugs encontrados:** dual-write 0% no bridge (corrigido) + `get_fixture_result_cards` inexistente no APIFootballClient (pré-existente, PENDENTE — cards não apuram resultado). Ver `docs/BUGS.md`.
+
+**A1 validado em produção (com jogos Conmebol ao vivo):** `bridge_betano` foi de **0% → 100%** de fill de `sofa_event_id` (16/16 stats, 88/88 events). Gargalo eliminado.
+
+**Sprint N (mesma sessão) — achados SofaScore + componentes do A2.** Análise do capture `.mitm`: (1) **WebSocket NATS** `ws.sofascore.com:9222` (FT/placar/cartão em tempo real) → `ws_client.py` (`SofaScoreLiveFeed`+parser, 7 unit + live); (2) **discovery por torneio** `/unique-tournament/{tid}/scheduled-events/{date}` → `get_tournament_scheduled_events`+`discovery.py` (live: 28 jogos/13 ligas keyed por sofa_event_id); (3) odds SofaScore **descartadas** (só 1X2/bet365). Tudo atrás de flag OFF. Ver `docs/sprints/2026-05-20-sprint-N-sofascore-realtime.md`.
+
+**Estado final:** A1 validado + componentes do A2 prontos e testados (flag OFF). Filtro de competição no resolver mata FP cross-competição.
+
+**Próximos passos (A2 — ver ROADMAP):** (1) wire `discovery.discover_scheduled` como fonte da agenda; (2) wire `SofaScoreLiveFeed` (smart-polling + FT real-time, conserta tb `get_fixture_result_cards`); (3) promover `sofa_event_id` a chave de leitura; (4) smoke + validação FP antes de flipar flags.
+
+---
+
+## 2026-05-19 — Sprint M.2: Multi-leg + bonus turbinada + settle automatico/manual + layout Betano
+
+**Contexto:** Usuario apostou R$40 @1.47 no signal CPES 138 (Bournemouth vs Manchester City, Over 9.5 escanteios), mas na Betano compôs uma multi (Empate + Manchester City Próximo gol + Mais de 8.5 escanteios = odd combinada 4.05) + bonus turbinada 25%. Tres problemas reportados: (1) modal "Registrar entrada" retornava 500; (2) jogo terminou GREEN mas decision do user ficou eternamente em "EM ANDAMENTO" (settle nunca rodou); (3) "Minhas Apostas" não permitia multi nem mostrava bonus/total estilo Betano.
+
+**O que foi feito:**
+
+- **Bug 1 (FK errada em banca_movements.bet_id)** — migration `0014_fix_banca_movements_bet_fk.sql` repointa FK de `bets(id)` legado pra `user_signal_decisions(id)`. Idempotência no endpoint `/api/signals/{id}/decision` impede bet_loss duplicado em re-POST. Ver `docs/BUGS.md` entrada 2026-05-19 (FK).
+
+- **Bug 2 (settle nunca rodava no resolver)** — `main.py::_propagar_settle_decisions` novo helper chamado depois de `database.atualizar_resultado`. Itera signal_ids do jogo+tipo_analise resolvido, chama `UserSignalDecisionsRepo.settle_auto()` em decisions SINGLE, e `BancaRepo.credit_payout()` cria bet_win com `+(stake + lucro_liquido + bonus)`. Multi nao toca (precisa confirm manual).
+
+- **Multi-leg + bonus** — migration `0015_user_signal_decisions_multi_bonus.sql`:
+  - `user_signal_decisions` ganha `bonus_pct DECIMAL(4,3)`, `bonus_cents BIGINT`, `is_multi BOOLEAN`, `requires_manual_confirmation BOOLEAN`, `manually_confirmed_at TIMESTAMPTZ`
+  - nova tabela `user_decision_legs(decision_id, ordem, mercado, descricao, linha, odd_leg, resultado)`
+  - 6 mercados conhecidos: `escanteios`, `cartoes`, `gols`, `1x2`, `ambas_marcam`, `custom`
+  - decide() aceita opcional `legs: list[dict]` + `bonus_pct`. Se >1 leg: `is_multi=true`, `requires_manual_confirmation=true`
+  - novo `confirm_manual_result(decision_id, resultado)` — user diz Ganhou/Perdeu/Push/Void; sistema calcula payout incluindo bonus + credita banca (idempotente por bet_id)
+  - novo `update_bonus(decision_id, bonus_pct)` pra editar bonus depois
+
+- **Novos endpoints** — `POST /api/signals/{id}/decision/confirm` (manual confirm pra multi), `PATCH /api/signals/{id}/decision/bonus` (edita turbinada depois). `POST /decision` original agora aceita `legs[]` e `bonus_pct` no body.
+
+- **Frontend `MinhasApostasPanel.tsx` redesenhado** — layout estilo Betano: card mostra legs com ícone por mercado + linha "Aposta R$X | Prêmios R$Y (× odd) | +Bonus R$Z (turbinada +N%) | Total R$T". Banner aviso "N apostas múltiplas aguardam sua confirmação". `DecisionModal` agora tem editor de legs (1o leg pré-preenchido do sinal CPES, botão "Add mercado", calcula odd combinada em tempo real, preview de retorno se GREEN). Novo `ConfirmResultModal` com botões Ganhou/Perdeu/Push/Void.
+
+- **Cálculo payout (canônico)** — em GREEN: `lucro_liq = stake * (odd - 1)`, `bonus = lucro_liq * bonus_pct`, `payout_cents = lucro_liq + bonus`, banca recebe `bet_win +(stake + payout_cents)` (estorno do stake reservation + lucro com bonus). Em RED: `payout = -stake`, banca sem movimento novo. Em PUSH/VOID: `bet_win +stake` (só estorna).
+
+**Bugs documentados:** ver `docs/BUGS.md` entradas 2026-05-19.
+
+**Estado final:**
+- Backend completo (api_server.py, repos, main.py wire). Migration 0014+0015 aplicadas.
+- Frontend: `dashboard/src/components/minhas-apostas/MinhasApostasPanel.tsx` reescrito; `lib/api.ts` com novos tipos. Dashboard rebuilt e rodando.
+- Smoke test end-to-end OK: decision 121 com 3 legs + bonus 25% → confirm GREEN → payout R$152,50 (lucro R$122 + bonus R$30,50) → banca credit bet_win R$192,50 (estorno R$40 + R$152,50).
+- Stats user agora corretos: 1G/0R, ROI +381,25%, bonus_total R$30,50.
+
+**Próximos passos (deferred):**
+- Settle automático em RED também (hoje precisa entrar manual ou esperar settle_auto pra single). Multi RED também só via confirm manual.
+- UI no `/dashboard` (page.tsx) ainda usa `UserSignalDetail` tipo antigo — campos novos (`legs`, `bonus_pct`) não exibidos ali. Layout Betano só em `/minhas-apostas`.
+- Tab "encerradas" automática quando `signal_resultado=GREEN` mesmo se decision ainda pending (hoje só vai pra closed quando `decision.resultado` preenche). Considerar fallback no tabOf().
+
+### Sistema de unidades (mesma sessão, 2026-05-19)
+
+**Contexto:** User quer raciocinar em unidades (u), não em R$ — banca dividida em N unidades, sinais sugerem "vale 2u / 4u nesse sinal". Pediu cálculo/previsão de quantas unidades cabem na banca dele.
+
+**O que foi feito:**
+- Migration `0016_banca_unidades.sql`: `banca.total_unidades INTEGER DEFAULT 100`.
+- `BancaRepo.get_summary` retorna `total_unidades`, `unit_value_cents` (= banca_atual / total_unidades), `unidades_disponiveis`. `setup()` aceita `total_unidades`; novo `update_unidades()`.
+- Endpoint `PATCH /api/banca/units {total_unidades}`.
+- Frontend `/banca`: card "Sistema de unidades" (1u vale R$X, unidades disponíveis, tabela previsão 1u/2u/3u/5u) + modal "Redividir" com quick-picks 20/50/100/200.
+- Frontend `/minhas-apostas` DecisionModal: bloco "Stake em unidades" com botões 1u/2u/3u/5u/10u, sugestão automática (`suggestedUnits`: NORMAL=1u, PREMIUM=2u, +1u se edge≥2.0), valor R$ sincroniza com unidades, mostra "Xu" ao lado do saldo. BetCard mostra "(Xu)" ao lado do valor apostado.
+
+**Estado final:** migration 0016 aplicada, backend+frontend rodando. Smoke OK: banca R$192,50 / 100u → 1u = R$1,92, previsão 2u=R$3,84 etc.
+
+---
+
 ## 2026-05-17 — Sprint M (Multi-tenant): Banca + Decisões por sinal + Dashboard limpo per-user + Fix upcoming/SSE
 
 **Contexto:** Usuário reportou que `/dashboard` e `/jogos-ao-vivo` não mostravam dados, `/banca` retornava 404 no setup, "próximos jogos" mostrava partidas que já tinham começado, e novos cadastros viam stats globais (76.9% winrate de OUTRAS pessoas) em vez de receber dashboard limpo. Permissão dada pra mexer no backend e refazer o sistema pra multi-tenant real.

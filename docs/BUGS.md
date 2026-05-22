@@ -14,6 +14,91 @@ Commit: hash (se aplicável)
 
 ---
 
+## 2026-05-20 — Fase H A1: dual-write `sofa_event_id` em 0% nos registros bridge_betano (o provider primário)
+
+**Sintoma:** Validação do A1 (pause 3-7 dias) parecia parada. Fill de `sofa_event_id` agregado ~2-10% nas 6 tabelas shadow. Por source: `sofascore` = 100% (22/22 stats, 86/86 events), `bridge_betano` = **0%** (0/208 stats, 0/4561 events). Como bridge_betano é o PRIMÁRIO da cascata K.1 (~90% do volume), o agregado afundava. `af_sofa_fixture_map` só tinha 1 entrada `provider_native` viva desde 05-18 (resto era backfill one-shot de 05-17).
+
+**Causa raiz:** Os 3 workers do bridge (`betano_stats_worker`, `betano_events_worker`, `betano_lineups_worker`), quando o snapshot vinha sem `sofa_event_id` (sempre, no caso do bridge), faziam **só** `af_sofa_map.get_sofa_id(fixture_id)` — lookup no banco. Como `af_sofa_fixture_map` só era populada por upsert oportunístico quando um snapshot SofaScore passava, fixtures que só capturavam via bridge (ex: Arsenal, Chelsea, Torreense) **nunca** entravam no mapa → `sofa_event_id` NULL pra sempre (chicken-and-egg). O passo de fallback pro **resolver live** — descrito no próprio docstring de `af_sofa_map.py` (linhas 6-13) — nunca foi implementado nos workers.
+
+Sub-bug encontrado junto: `FixtureMapRepo` não tinha `get_by_fixture_id`, mas `SofaScoreEventResolver._resolve_names` chamava exatamente esse método → caía sempre no `except` e perdia os names canônicos do `betano_fixture_map` (degradava o match, mas o SofaScore path mascarava porque já passava names no CanonicalFixture).
+
+**Fix:**
+1. `FixtureMapRepo.get_by_fixture_id()` — retorna row completa (home/away/league/kickoff). Conserta o resolver E habilita resolução por fixture_id.
+2. `SofaScoreEventResolver.resolve_by_fixture_id()` — puxa names+kickoff do `betano_fixture_map` e faz o mesmo fuzzy match em `/events/live`. Reusa o cache de `resolve()`.
+3. `AfSofaFixtureMapRepo.get_or_resolve(fixture_id, resolver=...)` — lookup → se NULL, cai pro resolver live → upsert `mapped_via='realtime_live'`.
+4. 3 workers passam a injetar `event_resolver` e usar `get_or_resolve`.
+5. `main.py` passa `event_resolver=self.sofa_event_resolver` aos 3 workers.
+
+**Validação:** Testado ao vivo — Torreense vs Casa Pia (Liga Portugal, ao vivo) resolveu pra sofa `16197899` e persistiu `realtime_live`. 120 testes dos módulos tocados passam. Pós-deploy, fill esperado deve saltar pra ~90%+ nos fixtures live no SofaScore.
+
+**Lição:**
+- Dual-write/shadow-key precisa cobrir **todos os write-paths**, não só o do provider que "naturalmente" conhece a chave. O primário (bridge) era justamente o que não conhecia → tinha que ter o fallback de resolução desde o A1.3.
+- Quando um docstring descreve o uso correto (`get_sofa_id` → `live_resolver` → `upsert`), confira se TODOS os call-sites seguem — aqui o passo do meio foi omitido em 3 lugares.
+- Validar feature de propagação exige **fill rate por source**, não só agregado. O agregado escondia o split 100%/0%.
+
+**Commits:** edits `data/repositories/fixture_map.py`, `data/repositories/af_sofa_map.py`, `data/providers/sofascore/event_resolver.py`, `workers/betano_{stats,events,lineups}_worker.py`, `main.py`.
+
+---
+
+## 2026-05-20 — Pré-existente: `get_fixture_result_cards` não existe no APIFootballClient (cards nunca apuram resultado)
+
+**Sintoma:** No boot do `cpes-main`, loop de verificação de resultados logava `ERROR Erro ao verificar resultados: 'APIFootballClient' object has no attribute 'get_fixture_result_cards'` (main.py:1682).
+
+**Causa raiz:** `main.py::_verificar_resultados` chama `self.api_client.get_fixture_result_cards(jogo_id)` mas `data/api_client.py` só tem `get_fixture_result` (corners/placar). Bug commitado (HEAD), não é da Fase H — exposto ao olhar os logs durante o deploy do A1. Significa que sinais de **cartões nunca são marcados GREEN/RED** → settle de apostas de cartões (Sprint M.2) também não dispara pra esse tipo.
+
+**Fix:** PENDENTE — precisa decidir se `get_fixture_result` serve pra cartões (basta extrair total de amarelos do FT) ou se precisa fetch dedicado. Não corrigido nesta sessão (fora do escopo A1; toca o path de settle/banca, exige cuidado).
+
+**Lição:** Erro estava sendo engolido pelo `try/except` do loop e ninguém via — só apareceu por inspeção ativa dos logs no deploy. Vale um alerta WAHA/Netdata pra ERROR recorrente no resolver de resultados.
+
+---
+
+## 2026-05-19 — Sprint M.2: settle nunca rodava → decisions ficavam eternamente em "EM ANDAMENTO" + banca sem credit
+
+**Sintoma:** User registrou aposta (decision 121: signal 138 Bournemouth, R$40 @4.05). Jogo terminou — `sinais.resultado=GREEN`, `escanteios_final=13` ✅. Porém: `user_signal_decisions.resultado=NULL`, `payout_cents=NULL`, `settled_at=NULL`. UI mostrava ResultPill "GREEN" (fallback pra `signal_resultado`) mas card ficava na aba "EM ANDAMENTO" (tabOf usa só `decision.resultado`). Banca não recebia o payout. Stats: 0G/0R, ROI 0%.
+
+**Causa raiz:** `main.py::_verificar_resultados` (linha 1572) chamava `database.atualizar_resultado(jogo_id, resultado, ...)` que atualiza `sinais` mas NUNCA tocava `user_signal_decisions` nem `banca_movements`. CLAUDE.md §13.14 já listava como pendência pós-Sprint M. Resultado: cada GREEN/RED do sistema deixava as decisions dos users penduradas; só seriam "fechadas" via UPSERT no decide() (nunca aconteceria pra entered).
+
+Agravante: mesmo se houvesse wire, single bets do CPES batem com sinal automaticamente, mas multi bets (mercados que CPES não conhece — gols, 1X2, marcador exato) não dão pra auto-settle. Tinha que ter caminho manual.
+
+**Fix:**
+1. `_propagar_settle_decisions(jogo_id, tipo_analise, resultado)` novo em `main.py`: query signal_ids resolvidos do jogo+tipo, itera, chama `UserSignalDecisionsRepo.settle_auto()` (SO single bets) + `BancaRepo.credit_payout()` (idempotente por decision_id).
+2. `settle_auto(signal_id, resultado)` filtra `requires_manual_confirmation = FALSE` — multi nao toca.
+3. `confirm_manual_result(decision_id, resultado)` + endpoint `POST /api/signals/{id}/decision/confirm` pra multi (e override em single se CPES errou).
+4. `credit_payout` cria `bet_win +(stake + payout_cents)` em GREEN (estorna stake reservation + adiciona lucro líquido com bonus). RED: no-op (bet_loss já contou). PUSH/VOID: `bet_void +stake` (só estorna).
+5. Migration `0015_user_signal_decisions_multi_bonus.sql`: bonus_pct, is_multi, requires_manual_confirmation + tabela user_decision_legs.
+
+**Lição:**
+- Cada nova feature Sprint M (decisions, banca) ficou silently broken porque o resolver de resultado é em `main.py` (worker) e não chamava o repo novo. **Wire end-to-end deveria ser validado por smoke test antes de merge** — não tinha teste cobrindo "signal vira GREEN → decision atualiza".
+- Convenção `bet_loss otimista → bet_win pós-resolução` só fecha quando ambos rodam. Sem o segundo lado, banca fica permanentemente debitada em GREEN. Sempre escrever os dois caminhos juntos (ou usar pattern de "reserva temporária" com timeout).
+- Multi vs Single auto-settle: o sistema só conhece os mercados que ele opera (escanteios, cartões). Tudo fora disso requer confirm manual — não dá pra inferir.
+
+**Commits:** migration 0015 + edits `main.py:1656,1700`, `data/repositories/user_signal_decisions.py` (reescrito), `data/repositories/banca.py` (`credit_payout`), `api_server.py:2230+` (endpoints novos), `dashboard/src/components/minhas-apostas/MinhasApostasPanel.tsx` (reescrito layout Betano).
+
+---
+
+## 2026-05-19 — Sprint M: FK errada em banca_movements.bet_id quebrava registro de entrada
+
+**Sintoma:** Modal "Registrar Entrada" no dashboard retornava `500 Internal Server Error` ao confirmar (signal #138, Bournemouth vs Manchester City). Decision row era criada (`user_signal_decisions.id=121` com `entered, 4.05, R$40`) mas banca_atual nunca debitava.
+
+**Causa raiz:** Migration `0011_banca.sql` declarou `bet_id BIGINT` sem FK explícita (comentário: "FK opcional p/ user_signal_decisions.id (0012)"), mas uma versão anterior do schema legado tinha criado `banca_movements_bet_id_fkey` apontando pra `bets(id)` — tabela do robô auto-aposta. Quando Sprint M passa `result["id"]` (que é `user_signal_decisions.id`) como `bet_id`, FK viola: `ForeignKeyViolationError`. Endpoint `/api/signals/{id}/decision` captura só `(LookupError, ValueError)` — `asyncpg.exceptions.ForeignKeyViolationError` borbulha como 500.
+
+Agravante secundário: re-POST da mesma decision criava bet_loss duplicado (UPSERT na decision é idempotente, mas `add_movement` sempre INSERT-a) — debit duplo da banca em retry.
+
+**Fix:**
+1. Migration `0014_fix_banca_movements_bet_fk.sql`: `DROP CONSTRAINT banca_movements_bet_id_fkey` + `UPDATE ... bet_id=NULL WHERE bet_id NOT IN (SELECT id FROM user_signal_decisions)` (limpa órfãos) + `ADD FOREIGN KEY ... REFERENCES user_signal_decisions(id) ON DELETE SET NULL`
+2. `api_server.py::api_signal_decide`: antes de `add_movement`, query `SELECT 1 FROM banca_movements WHERE bet_id=$1 AND tipo='bet_loss'` — pula INSERT se já existe (idempotência)
+
+**Lição:**
+- Migrations que só declaram colunas sem checar/recriar FKs herdadas podem causar "FK ghosts" — sempre fazer `DROP CONSTRAINT IF EXISTS` antes de `ADD CONSTRAINT` em refactors de schema.
+- Endpoints que orquestram 2 mutations (decision + banca movement) em conexões separadas precisam ser **explicitamente idempotentes** ou unificadas em uma transação. Hoje estão em conexões distintas — fica como dívida.
+- Try/except deve catchar `asyncpg.exceptions.*` ao tocar em FK, ou propagar como 4xx legível.
+
+**Pendência relacionada (não fix aqui):** `UserSignalDecisionsRepo.settle()` ainda não cria `bet_win` movement quando signal vira GREEN — banca permanece debitada mesmo em wins (CLAUDE.md §13.14 já lista como aberto).
+
+**Commits:** migration 0014 + edit em `api_server.py:2257-2280`.
+
+---
+
 ## 2026-05-18 — Dual-write Fase H A1.3 perdia sofa_event_id de SofaScore
 
 **Sintoma:** Netdata custom collector `cpes_metrics.dual_write` mostrou cobertura de `sofa_event_id` por fonte muito abaixo do esperado:

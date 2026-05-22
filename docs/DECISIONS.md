@@ -356,3 +356,33 @@ schema novo + worker + ~15 testes.
 - ❌ Se `settle` falhar entre o `bet_loss` otimista e o `bet_win` real, banca fica errada. Mitigação futura: job de reconciliação batch.
 
 **Implementação:** Migration `0011_banca.sql`, `BancaRepo`, 6 endpoints `/api/banca/*`. Commit `feat(banca): migration 0011 + BancaRepo` + correlatos.
+
+## 2026-05-19 — Sprint M.2: multi-leg com confirmação manual + bonus turbinada + settle automático
+
+**Contexto:** O sinal CPES é sempre um único mercado (Over X escanteios ou Over Y cartões). Mas o user real compõe **multi** na Betano usando o sinal como UMA das legs (ex: Empate + Próximo gol + Over 8.5 escanteios = odd combinada 4.05) e às vezes ganha **bonus turbinada** (+25% sobre lucro). Além disso, a Sprint M tinha deixado o settle das decisions como pendência: jogo terminava, `sinais.resultado` virava GREEN/RED, mas `user_signal_decisions` ficava pendurado eternamente.
+
+**Decisão — settle em dois caminhos (auto vs manual):**
+- **Single bet** (1 leg, mercado = sinal CPES): settle **automático** quando `main.py::_verificar_resultados` resolve o jogo. `_propagar_settle_decisions` chama `settle_auto()` (filtra `requires_manual_confirmation=FALSE`) + `BancaRepo.credit_payout()`.
+- **Multi bet** (2+ legs): `requires_manual_confirmation=TRUE`. CPES não conhece os mercados extras (gols, 1X2, marcador exato) → não tem como derivar o resultado. User confirma manualmente Ganhou/Perdeu/Push/Void via `POST /decision/confirm`, e só então a banca credita.
+
+**Decisão — bonus aplica sobre lucro líquido, não payout bruto:** `bonus = (stake*odd - stake) * bonus_pct`. Validado contra a Betano real: aposta R$40 @4.05 turbinada +25% → lucro líquido R$122 → bonus R$30,50 (bate com o print). `payout_cents` (P&L) = lucro_liq + bonus; banca recebe `bet_win +(stake + payout_cents)`.
+
+**Decisão — sistema de unidades (u):** banca dividida em N unidades (`total_unidades`, default 100). `1u = banca_atual / N`. Sinais sugerem stake em unidades (`suggestedUnits`: NORMAL=1u, PREMIUM=2u, +1u se edge≥2.0). Raciocínio em unidades é padrão de gestão de banca profissional — abstrai o R$ absoluto e força disciplina de stake proporcional.
+
+**Alternativas consideradas:**
+- **Auto-settle de multi por heurística** (assumir que a leg CPES define o resultado): rejeitado — as outras legs podem perder mesmo com a leg CPES ganhando. Marcaria GREEN falso.
+- **Bonus como % do payout bruto:** rejeitado — não bate com a Betano (que turbina o lucro, não o retorno total).
+- **Unidades como snapshot por aposta** (gravar quantas u valia no momento): adiado (YAGNI) — hoje a UI calcula u pelo `unit_value_cents` atual, aproximado. Suficiente pra previsão/sugestão. Refinar se o user reclamar de drift histórico.
+- **`unit_pct` legado:** mantido como fallback quando `total_unidades` é NULL (compat com bancas criadas pré-0016).
+
+**Trade-offs:**
+- ✅ ROI real mesmo com multi (user confirma como de fato saiu).
+- ✅ Liberdade total de composição (6 mercados: escanteios/cartoes/gols/1x2/ambas_marcam/custom).
+- ✅ Bonus turbinada reflete a Betano fielmente.
+- ✅ Unidades dão previsão/sugestão de stake sem conta manual.
+- ❌ Multi exige ação manual do user pós-jogo (não tem como evitar — CPES não opera esses mercados).
+- ❌ `decide()` agora orquestra decision + legs + (no api_server) bet_loss em conexões separadas — idempotência por `bet_id` cobre re-POST, mas mudar valor de aposta já registrada não re-ajusta banca (frontend bloqueia re-edição).
+
+**Implementação:** Migrations `0014` (FK fix), `0015` (legs+bonus), `0016` (unidades). `UserSignalDecisionsRepo` (legs, `settle_auto`, `confirm_manual_result`, `update_bonus`), `BancaRepo.credit_payout` + `update_unidades`, `main.py::_propagar_settle_decisions`, endpoints `POST /decision/confirm` + `PATCH /decision/bonus` + `PATCH /banca/units`, frontend `MinhasApostasPanel.tsx` (layout Betano + multi-leg modal + confirm modal) + `BancaPanel.tsx` (card unidades). Ver `docs/BUGS.md` (2026-05-19) e `docs/CHANGELOG.md` (Sprint M.2).
+
+**Status:** ATIVA

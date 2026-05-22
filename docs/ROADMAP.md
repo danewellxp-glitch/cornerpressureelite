@@ -23,12 +23,17 @@ Fases planejadas + estado atual. Atualizado quando fase fecha ou nova é planeja
 - **Fase F** — Eventos Betano via `event.incidents[]` (dataset puro). `BetanoEventsWorker` persiste em `events_history` paralelo ao pipeline live. CompositeEventsProvider Betano→AF. Smoke real validou 18 events via fallback AF (bridge renewer em warmup intermitente, source bridge_betano flippa quando recupera — mesma dinâmica E.1). Dedup UNIQUE comprovado, throttle 30s, decision_engine intocado. `USE_BETANO_EVENTS=true` ativo — commit `a65bfe6` 2026-05-17
 - **Fase G.0** — Investigação técnica lineups Betano + validação saúde renewer 24h. Schema descoberto inspecionando `event.roster` do `/event/<id>/state` (já capturado pela E.1) — CASO α puro confirmado, zero novo endpoint — commit `508147b` 2026-05-17
 - **Fase G.1** — Lineups Betano via `event.roster` (dataset puro). 6 commits: migration 0007 (`86da575`), Protocol+adapters+Composite (`4d388ab` + ajustes pós-review `a4ceb97`), Worker+configs+wiring (`223368d` + fix VAL 4 `9de2829`), suite 48 testes (`63cfd3a`). Decision_engine intocado, `USE_BETANO_LINEUPS=true` ativo. Smoke leve verde; smoke real assíncrono (sem jogos live no momento, capturas acontecem quando próximo lote começar) — 2026-05-17
+- **Sprint M** (2026-05-17) — Multi-tenant: banca per-user (migration 0011) + decisões por sinal opt-in (0012) + dashboard limpo per-user. Ver CLAUDE.md §13.14.
+- **Sprint M.2** (2026-05-19) — Multi-leg + bonus turbinada + settle automático (single) / manual (multi) + sistema de unidades. Migrations 0014 (FK fix), 0015 (legs+bonus), 0016 (unidades). Resolve pendência do settle da Sprint M. Layout "Minhas Apostas" estilo Betano. Ver CLAUDE.md §13.16.
+- **Fase K + K.1** (2026-05-17) — SofaScore na cascata (stats/events/lineups, Betano→SofaScore→AF) em produção. Ver CLAUDE.md §13.2.
+- **Fase H A1** (2026-05-17→20) — Dual-key `sofa_event_id` (migration 0013) + dual-write + **fix do gargalo (2026-05-20)**: workers do bridge não chamavam o resolver live → fill 0% no `bridge_betano`. Corrigido (`get_or_resolve` + `resolve_by_fixture_id` + filtro de competição). **Validado em produção: 0% → 100%** com jogos ao vivo. Ver BUGS.md 2026-05-20.
+- **Ligas CONMEBOL** (2026-05-20) — Libertadores + Sul-Americana (config + SofaScore map). Fix timezone na agenda (4→13 jogos).
+- **Sprint N** (2026-05-20) — Achados do capture .mitm + implementação (ver abaixo "Cutover sofa_event_id").
 
 ## Em progresso
 
-- **Fase K.0 entregue** — Investigação SofaScore confirmou CASO α via `curl_cffi` (10/10 endpoints 200 OK, 47 req/s sustentado, coach via `/managers`, lesões via `lineups.missingPlayers`, standings ricos). Doc + ADR em branch `feat/sofascore-integration`. Aguarda revisão Daniel pra K.1.
-- **Smoke real Fase G.1** — Validar captura `lineups_history` em jogo live com `minute<=5` (próximo lote 2026-05-17 10:30 BRT+)
-- **Smoke real D.0 + D.2** — Validar telemetria + matches em jogo de liga monitorada ao vivo (pendente overlap real)
+- **Cutover sofa_event_id (A2)** — pré-requisitos prontos: A1 validado (fill ~100%) + filtro de competição (anti-FP) + discovery nativo (Sprint N). Falta wiring no loop. Ver seção dedicada abaixo.
+- **Smoke real D.0 + D.2** — Validar telemetria + matches em jogo de liga monitorada ao vivo (Conmebol ao vivo agora dá a janela).
 
 ## Próximas fases (Caminho A soft restante)
 
@@ -69,15 +74,44 @@ TODOs registrados durante fases anteriores (consolidar em sprint dedicado):
 
 **Total Caminho A soft restante:** ~13-25h em 3-5 sessões (após G entregue: F.2 + H + I + cache compartilhado).
 
-## Fases Caminho A hard (eliminar AF completamente)
+## Caminho A hard — Cutover `sofa_event_id` (eliminar AF completamente)
 
-### Fase K — SofaScore como fallback + dataset extra (~25-35h)
-- K.0 investigação ✅ entregue (CASO α via `curl_cffi`).
-- K.1 implementação: 3 adapters Composite (stats/events/lineups com SofaScore fallback) + extensão `CanonicalLineup` (coach + missing_players) + workers novos (standings + team-form + best-players) + ~30 testes + smoke.
-- Após K.1 estável: Fase M descontinua `APIFootballClient` runtime (residual em discovery/FT cross-check).
+Branch `feat/remove-af-completely`. Plano de 3 etapas (migration 0013): A1 dual-key
+→ A2 cutover (sofa vira primária) → A3 deprecar `fixture_id` (AF sai). Fase K
+(SofaScore na cascata) ✅ em produção é o pré-requisito de dados.
 
-### Fase M — Descontinuar API-Football do runtime quente (~2h)
-Quando K + H + I entregues e estáveis, remove `APIFootballClient` do runtime quente. AF residual: `get_today_schedule` (1 req/liga/dia) + cross-check FT (cold path).
+### A1 — Dual-key `sofa_event_id` ✅ VALIDADO (2026-05-20)
+Shadow column em 6 tabelas + `af_sofa_fixture_map`. Fill estava 0% no `bridge_betano`
+(gargalo: workers não chamavam o resolver live). Corrigido + **validado em produção
+0% → 100%** com jogos Conmebol ao vivo. Filtro de competição no resolver mata FP
+cross-competição. Ver BUGS.md 2026-05-20.
+
+### Sprint N — Achados SofaScore (capture .mitm 2026-05-20) + componentes do A2
+Capturado via F12+mitmproxy, analisado, **testado ao vivo**:
+- 🟢 **WebSocket NATS** (`wss://ws.sofascore.com:9222`) — push em tempo real de
+  placar/status/**FT**/cardsCode. Cliente `data/providers/sofascore/ws_client.py`
+  (curl_cffi impersonate, thread+asyncio.Queue, parser NATS testado). **NÃO é
+  fonte de stats** (sem escanteios/posse) — é notificador-de-mudança + FT.
+- 🟢 **Discovery por torneio** (`/unique-tournament/{tid}/scheduled-events/{date}`)
+  — `SofaScoreClient.get_tournament_scheduled_events` + `discovery.py`. Testado:
+  28 jogos das 13 ligas hoje, keyed por `sofa_event_id`, sem AF.
+- 🔴 **Odds SofaScore descartadas** — `/event/{id}/odds/{provider}/all` só tem
+  "Full time" (1X2), provider BR = bet365. Sem escanteios/cartões. Odds continuam
+  no bridge Betano.
+- Flags `SOFASCORE_WS_ENABLED` / `SOFASCORE_DISCOVERY_ENABLED` (default OFF — código
+  pronto e testado, não fiado no loop ainda).
+
+### A2 — Cutover (próximo) — `sofa_event_id` vira chave primária
+Pré-requisitos prontos (A1 validado + filtro anti-FP + discovery + WS). Falta:
+1. Wire `discovery.discover_scheduled` como fonte da agenda (atrás de `SOFASCORE_DISCOVERY_ENABLED`), AF como fallback durante transição.
+2. Wire `SofaScoreLiveFeed` no loop: **smart-polling** (re-buscar `/statistics` só no delta) + **FT em tempo real** (substitui cold-check de 2h via AF; conserta tb o bug `get_fixture_result_cards`).
+3. Promover `sofa_event_id` a chave de leitura nas queries (hoje ainda `fixture_id`).
+4. Smoke + validação de FP com volume real antes de flipar as flags.
+
+### A3 — Deprecar `fixture_id` / remover AF do runtime
+Quando A2 estável: `get_live_fixtures` + `get_today_schedule` saem (substituídos por
+WS firehose + discovery por torneio); `get_fixture_result*` sai (FT via WS). AF
+residual zero no runtime quente.
 
 ## On Hold
 
