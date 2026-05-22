@@ -60,6 +60,12 @@ services:
     environment:
       - CPES_API_URL=http://api:8000
       - TZ=America/Sao_Paulo
+    # JWT_SECRET precisa bater com o da API (cpes-api) — middleware do
+    # Next.js verifica o token assinado pela API. .env.production está no
+    # .dockerignore, então env_file é a única forma de entrar no container.
+    env_file:
+      - path: ./corner-pressure-elite/.env
+        required: true
     depends_on:
       - api
     networks:
