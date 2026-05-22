@@ -158,6 +158,9 @@ class CornerPressureElite:
         # SofaScore → AF super-residual) e enriquecedor de coach/missing_players.
         self.sofa_client = None
         self.sofa_event_resolver = None
+        # WebSocket NATS SofaScore (Sprint N): FT em tempo real -> settle imediato.
+        self._ws_feed = None
+        self._ws_settle_task = None
         # Última captura de telemetria por (fixture_id, market) -> timestamp ms.
         self._last_capture_at: Dict[tuple, int] = {}
         self._running = False
@@ -338,6 +341,7 @@ class CornerPressureElite:
                     calculator=stats_calculator,
                     bootstrap_lookback_min=STATS_BOOTSTRAP_LOOKBACK_MIN,
                     af_sofa_map=self.af_sofa_map_repo,
+                    event_resolver=self.sofa_event_resolver,
                 )
                 logger.info(
                     "BetanoStatsWorker ativo — stats via bridge (Fase E.1 PARTE F')"
@@ -370,6 +374,7 @@ class CornerPressureElite:
                     provider=composite_events,
                     repo=events_repo,
                     af_sofa_map=self.af_sofa_map_repo,
+                    event_resolver=self.sofa_event_resolver,
                 )
                 logger.info(
                     "BetanoEventsWorker ativo — events via bridge (Fase F)"
@@ -403,6 +408,7 @@ class CornerPressureElite:
                     repo=lineups_repo,
                     max_minute=LINEUPS_MAX_MINUTE,
                     af_sofa_map=self.af_sofa_map_repo,
+                    event_resolver=self.sofa_event_resolver,
                 )
                 logger.info(
                     "BetanoLineupsWorker ativo — lineups via bridge (Fase G.1) max_minute=%d",
@@ -503,6 +509,18 @@ class CornerPressureElite:
 
         # Loop principal
         self._running = True
+
+        # WebSocket SofaScore: FT em tempo real -> settle imediato (Sprint N).
+        if getattr(config, "SOFASCORE_WS_ENABLED", False):
+            try:
+                from data.providers.sofascore.ws_client import SofaScoreLiveFeed
+                self._ws_feed = SofaScoreLiveFeed(subjects=["sport.football"])
+                await self._ws_feed.start()
+                self._ws_settle_task = asyncio.create_task(self._ws_settle_loop())
+                logger.info("SofaScore WS feed iniciado (FT real-time -> settle)")
+            except Exception as e:
+                logger.warning("Falha ao iniciar SofaScore WS feed: %s", e)
+
         try:
             await self._main_loop()
         except KeyboardInterrupt:
@@ -761,6 +779,7 @@ class CornerPressureElite:
 
                     await self._check_daily_summary()
                     await self._check_upcoming_notifications()
+                    await self._settle_finished_games()
                     await self._verificar_resultados()
 
                     # Se ainda ha sinais pendentes (jogos terminados ou prestes a),
@@ -823,6 +842,7 @@ class CornerPressureElite:
                         pass
                     await self._check_daily_summary()
                     await self._check_upcoming_notifications()
+                    await self._settle_finished_games()
                     await asyncio.sleep(self.effective_polling_interval)
                     continue
 
@@ -1652,6 +1672,8 @@ class CornerPressureElite:
                         tipo_analise="ESCANTEIOS"
                     )
 
+                    await self._propagar_settle_decisions(jogo_id, "ESCANTEIOS", resultado)
+
                     try:
                         await self.database.atualizar_snapshot_resultado(jogo_id, escanteios_final)
                     except Exception as snap_err:
@@ -1679,6 +1701,8 @@ class CornerPressureElite:
                     logger.warning("Sem requisicoes disponiveis para verificar resultados de cartoes")
                     break
 
+                if not hasattr(self.api_client, "get_fixture_result_cards"):
+                    continue  # cartoes settlam via _settle_finished_games (stats_history)
                 resultado_final = await self.api_client.get_fixture_result_cards(jogo_id)
 
                 if resultado_final:
@@ -1696,6 +1720,8 @@ class CornerPressureElite:
                         roi=roi,
                         tipo_analise="CARTOES"
                     )
+
+                    await self._propagar_settle_decisions(jogo_id, "CARTOES", resultado)
                     
                     resultados_cartoes.append({
                         "jogo_id": jogo_id,
@@ -1727,6 +1753,232 @@ class CornerPressureElite:
 
         except Exception as e:
             logger.error(f"Erro ao verificar resultados: {e}", exc_info=True)
+
+    async def _propagar_settle_decisions(self, jogo_id: int, tipo_analise: str, resultado: str):
+        """Sprint M.2: ao resolver um sinal, propaga settle pras decisions dos users.
+
+        Single bets sao auto-settled + banca creditada. Multi bets ficam aguardando
+        confirmacao manual do user (CPES nao conhece todos os mercados da multi).
+        """
+        try:
+            from data.repositories.user_signal_decisions import UserSignalDecisionsRepo
+            from data.repositories.banca import BancaRepo
+            decisions_repo = UserSignalDecisionsRepo(self.database.pool)
+            banca_repo = BancaRepo(self.database.pool)
+
+            async with self.database.pool.acquire() as conn:
+                signal_ids = await conn.fetch(
+                    """
+                    SELECT id FROM sinais
+                    WHERE jogo_id = $1 AND tipo_analise = $2 AND resultado = $3
+                    """,
+                    jogo_id, tipo_analise, resultado,
+                )
+
+            for sig_row in signal_ids:
+                signal_id = int(sig_row["id"])
+                settled = await decisions_repo.settle_auto(signal_id, resultado=resultado)
+                for d in settled:
+                    try:
+                        await banca_repo.credit_payout(
+                            int(d["user_id"]),
+                            decision_id=int(d["id"]),
+                            stake_cents=int(d["valor_apostado_cents"] or 0),
+                            payout_cents=int(d["payout_cents"] or 0),
+                            bonus_cents=int(d["bonus_cents"] or 0),
+                            resultado=resultado,
+                            signal_id=signal_id,
+                        )
+                        logger.info(
+                            f"[SETTLE] decision {d['id']} (user {d['user_id']}, signal {signal_id}) "
+                            f"-> {resultado} payout={d['payout_cents']}c bonus={d['bonus_cents']}c"
+                        )
+                    except LookupError:
+                        logger.warning(
+                            f"[SETTLE] user {d['user_id']} sem banca configurada — decision {d['id']} settled mas sem credit"
+                        )
+        except Exception as e:
+            logger.error(f"[SETTLE] propagar_settle_decisions falhou (jogo {jogo_id}, {tipo_analise}): {e}", exc_info=True)
+
+    async def _get_final_counts(self, jogo_id: int, force: bool = False) -> Optional[Dict]:
+        """Placar final cru (escanteios+cartoes) do ultimo snapshot stats_history.
+
+        Sem AF. Conservador: so devolve quando o jogo chegou na reta final
+        (minute>=88) E parou de atualizar ha >=6min (terminou). Senao None.
+
+        `force=True` (FT confirmado pelo WebSocket SofaScore) pula o gate de
+        staleness — basta um snapshot na reta final (minute>=80). Pode
+        subestimar acrescimos — user pode corrigir via confirm manual.
+        """
+        async with self.database.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT corners_home, corners_away, yellow_cards_home,
+                       yellow_cards_away, minute, captured_at
+                FROM stats_history WHERE fixture_id = $1
+                ORDER BY captured_at DESC LIMIT 1
+                """,
+                jogo_id,
+            )
+        if not row:
+            return None
+        minute = row["minute"] or 0
+        captured = row["captured_at"]
+        age_min = (
+            (datetime.now(timezone.utc) - captured).total_seconds() / 60
+            if captured else 999
+        )
+        # "Terminou" = chegou na reta final (minute>=80) E os stats pararam de
+        # atualizar (stale). No polling exige stale>=10min (jogo ao vivo poll ~30s,
+        # 10min sem update => acabou ou feed caiu); com WS (FT confirmado) basta o
+        # minuto. Limitacao: se o feed parou antes do fim, pode subestimar
+        # acrescimos perto da linha — user corrige via confirm manual.
+        if minute < 80:
+            return None
+        if not force and age_min < 10:
+            return None
+        return {
+            "corners": (row["corners_home"] or 0) + (row["corners_away"] or 0),
+            "cards": (row["yellow_cards_home"] or 0) + (row["yellow_cards_away"] or 0),
+        }
+
+    async def _settle_finished_games(self, fixture_ids=None, force: bool = False):
+        """Settle RAPIDO via stats_history (sem AF, ~6min apos FT). Fecha SINAIS
+        (vs linha do sinal) + APOSTAS MANUAIS (vs linha do user) de jogos
+        terminados. Idempotente (so toca resultado NULL).
+
+        `fixture_ids` + `force=True` = disparo pelo WebSocket SofaScore (FT
+        instantaneo) — settla so os jogos informados, pulando o gate de staleness.
+        Sem args = varredura periodica (jogos com sinal/aposta pendente).
+        """
+        try:
+            from data.repositories.user_signal_decisions import UserSignalDecisionsRepo
+            from data.repositories.banca import BancaRepo
+            pool = self.database.pool
+
+            # Sinais pendentes (dedup por jogo+tipo, igual _verificar_resultados).
+            try:
+                pendentes = await self.database.get_sinais_pendentes()
+            except Exception:
+                pendentes = []
+            sinais_por_jogo: dict = {}
+            for s in pendentes:
+                sinais_por_jogo.setdefault(s.jogo_id, {}).setdefault(s.tipo_analise, s)
+
+            # Jogos com legs manuais abertas.
+            async with pool.acquire() as conn:
+                mrows = await conn.fetch(
+                    """
+                    SELECT DISTINCT jogo_id FROM user_decision_legs
+                    WHERE resultado IS NULL AND jogo_id IS NOT NULL
+                      AND mercado IN ('escanteios', 'cartoes')
+                    """
+                )
+            manual_jogos = {int(r["jogo_id"]) for r in mrows}
+
+            if fixture_ids is not None:
+                candidatos = {int(f) for f in fixture_ids}
+            else:
+                candidatos = set(sinais_por_jogo.keys()) | manual_jogos
+            if not candidatos:
+                return
+
+            decisions_repo = UserSignalDecisionsRepo(pool)
+            banca_repo = BancaRepo(pool)
+
+            for jogo_id in candidatos:
+                finals = await self._get_final_counts(jogo_id, force=force)
+                if finals is None:
+                    continue  # jogo ainda nao terminou (ou sem snapshot)
+
+                # --- SINAIS (settla pela linha do sinal) ---
+                for tipo, s in sinais_por_jogo.get(jogo_id, {}).items():
+                    final = finals["corners"] if tipo == "ESCANTEIOS" else finals["cards"]
+                    linha = s.linha
+                    resultado = "GREEN" if final > linha else "RED"
+                    odd = s.odd or 1.0
+                    roi = (odd - 1.0) if resultado == "GREEN" else -1.0
+                    try:
+                        await self.database.atualizar_resultado(
+                            jogo_id=jogo_id, resultado=resultado,
+                            escanteios_final=final, roi=roi, tipo_analise=tipo,
+                        )
+                        await self._propagar_settle_decisions(jogo_id, tipo, resultado)
+                        logger.info(
+                            "[FAST-SETTLE] sinal jogo=%s %s %s/linha %s -> %s",
+                            jogo_id, tipo, final, linha, resultado,
+                        )
+                    except Exception as e:
+                        logger.error("[FAST-SETTLE] sinal jogo=%s err=%s", jogo_id, e)
+
+                # --- APOSTAS MANUAIS (settla pela linha do user, por leg) ---
+                affected: set[int] = set()
+                affected |= set(await decisions_repo.settle_legs_for_game(
+                    jogo_id, "escanteios", finals["corners"]))
+                affected |= set(await decisions_repo.settle_legs_for_game(
+                    jogo_id, "cartoes", finals["cards"]))
+                for did in affected:
+                    settled = await decisions_repo.try_settle_decision(did)
+                    if settled is None:
+                        continue
+                    try:
+                        await banca_repo.credit_payout(
+                            int(settled["user_id"]),
+                            decision_id=int(settled["id"]),
+                            stake_cents=int(settled["valor_apostado_cents"] or 0),
+                            payout_cents=int(settled["payout_cents"] or 0),
+                            bonus_cents=int(settled["bonus_cents"] or 0),
+                            resultado=settled["resultado"],
+                            label=f"aposta manual #{settled['id']}",
+                        )
+                        logger.info(
+                            "[FAST-SETTLE] manual decision=%s -> %s (jogo %s)",
+                            settled["id"], settled["resultado"], jogo_id,
+                        )
+                    except LookupError:
+                        logger.warning(
+                            "[FAST-SETTLE] user %s sem banca — decision %s sem credit",
+                            settled["user_id"], settled["id"],
+                        )
+        except Exception as e:
+            logger.error("[FAST-SETTLE] falhou: %s", e, exc_info=True)
+
+    async def _sofa_to_fixture(self, sofa_event_id: int) -> Optional[int]:
+        """Reverse lookup sofa_event_id -> AF fixture_id (af_sofa_fixture_map)."""
+        try:
+            async with self.database.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT fixture_id FROM af_sofa_fixture_map WHERE sofa_event_id = $1 LIMIT 1",
+                    sofa_event_id,
+                )
+            return int(row["fixture_id"]) if row else None
+        except Exception:
+            return None
+
+    async def _ws_settle_loop(self):
+        """Consome o firehose NATS SofaScore; no FT de um jogo monitorado dispara
+        settle imediato (sem esperar a varredura periodica de ~6min). Sprint N.
+        """
+        logger.info("[WS-SETTLE] loop iniciado (firehose sport.football)")
+        while self._running:
+            try:
+                delta = await self._ws_feed.get(timeout=30)
+            except Exception:
+                await asyncio.sleep(2)
+                continue
+            if delta is None or not delta.is_finished or delta.sofa_event_id is None:
+                continue
+            fixture_id = await self._sofa_to_fixture(delta.sofa_event_id)
+            if fixture_id is None:
+                continue  # jogo nao monitorado pelo CPES
+            logger.info(
+                "[WS-FT] sofa=%s -> fixture=%s FINISHED -> settle imediato",
+                delta.sofa_event_id, fixture_id,
+            )
+            try:
+                await self._settle_finished_games([fixture_id], force=True)
+            except Exception as e:
+                logger.error("[WS-FT] settle falhou fixture=%s err=%s", fixture_id, e)
 
     async def _enviar_resultados_whatsapp(self, resultados: list, tipo: str = "ESCANTEIOS"):
         """Envia resumo de resultados via WhatsApp (Sprint 2.4).
@@ -1981,6 +2233,19 @@ class CornerPressureElite:
             except asyncio.CancelledError:
                 pass
             logger.info("WAHA healthcheck encerrado")
+
+        # Parar WS feed SofaScore
+        if self._ws_settle_task:
+            self._ws_settle_task.cancel()
+            try:
+                await self._ws_settle_task
+            except asyncio.CancelledError:
+                pass
+        if self._ws_feed is not None:
+            try:
+                await self._ws_feed.stop()
+            except Exception:
+                pass
 
         await self.notifier.close()
         await self.api_client.close()
