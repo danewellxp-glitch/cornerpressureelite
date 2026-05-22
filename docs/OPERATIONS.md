@@ -545,3 +545,49 @@ docker exec cpes-postgres psql -U cpes_user -d cpes -c \
 - `version` INTEGER (snapshot version do payload)
 - `captured_at` TIMESTAMPTZ, `raw` JSONB (roster original preservado)
 - UNIQUE dedup `(fixture_id, source, team_side)` — 1 lineup por lado.
+
+## A2 shadow discovery (validação pré-cutover)
+
+Mede o que o cutover `sofa_event_id` ganharia/perderia se trocasse o discovery
+do AF pro SofaScore — **sem mudar o que é monitorado**. Roda `discover_scheduled`
+em paralelo ao AF e loga a cobertura. Usar pra acumular evidência ANTES de
+promover o discovery a fonte real (passo do A2). Ver CLAUDE.md §13.17.
+
+### Toggle `SOFASCORE_DISCOVERY_ENABLED`
+
+Ativar:
+```bash
+grep -q "^SOFASCORE_DISCOVERY_ENABLED" corner-pressure-elite/.env || \
+  echo 'SOFASCORE_DISCOVERY_ENABLED=true' >> corner-pressure-elite/.env
+
+# config nova em config.py exige REBUILD (não só recreate)
+docker compose up -d --build main
+```
+
+Reverter:
+```bash
+sed -i '/^SOFASCORE_DISCOVERY_ENABLED/d' corner-pressure-elite/.env
+docker compose up -d --force-recreate main
+```
+
+> Pré-requisito: `USE_SOFASCORE=true` (o shadow usa o `SofaScoreClient` já
+> inicializado). Se `USE_SOFASCORE=false`, o shadow é no-op silencioso.
+
+### Observar a cobertura
+
+Roda 1×/dia (no refresh da agenda) + quando o dia vira. Acompanhar ao longo de
+vários dias — decisão de cutover exige `af_only` consistentemente baixo:
+```bash
+docker logs cpes-main 2>&1 | grep "A2-SHADOW" | tail -20
+# Linha-resumo:
+#   [A2-SHADOW] discovery vs AF: af=12 sofa=14 matched=11 (92% do AF) af_only=1 sofa_only=3
+# WARNING por jogo que o cutover PERDERIA (AF vê, Sofa não):
+#   [A2-SHADOW] AF-only (cutover PERDERIA): liga=39 Arsenal vs Chelsea
+# INFO por jogo que o cutover GANHARIA (só Sofa vê):
+#   [A2-SHADOW] Sofa-only (cutover GANHARIA): liga=39 sofa=... Brentford vs Fulham status=notstarted
+```
+
+**Interpretação:** `af_only` alto = SofaScore não cobre ligas/jogos que o AF
+cobre → cutover regrediria a agenda (não flipar). `af_only ≈ 0` por dias com
+volume real = seguro promover o discovery a fonte. `sofa_only` alto pode ser
+cobertura extra (bom) ou ruído de torneio (revisar nomes/ligas).

@@ -386,3 +386,25 @@ schema novo + worker + ~15 testes.
 **Implementação:** Migrations `0014` (FK fix), `0015` (legs+bonus), `0016` (unidades). `UserSignalDecisionsRepo` (legs, `settle_auto`, `confirm_manual_result`, `update_bonus`), `BancaRepo.credit_payout` + `update_unidades`, `main.py::_propagar_settle_decisions`, endpoints `POST /decision/confirm` + `PATCH /decision/bonus` + `PATCH /banca/units`, frontend `MinhasApostasPanel.tsx` (layout Betano + multi-leg modal + confirm modal) + `BancaPanel.tsx` (card unidades). Ver `docs/BUGS.md` (2026-05-19) e `docs/CHANGELOG.md` (Sprint M.2).
 
 **Status:** ATIVA
+
+## 2026-05-22 — A2: shadow-validar o discovery SofaScore antes de promovê-lo a fonte
+
+**Contexto:** O passo 1 do A2 (ROADMAP) é "wire `discover_scheduled` como fonte da agenda". Mas o loop quente ainda navega por `fixture_id` AF (busca live/stats/odds/resultado por essa chave). Trocar a fonte do discovery pro SofaScore-nativo sem antes promover `sofa_event_id` a chave de leitura (passo 3) acoplaria duas mudanças grandes no caminho que decide *o que é monitorado* — alto risco de regredir a agenda silenciosamente.
+
+**Decisão:** Antes de promover o discovery a fonte, rodar um **shadow** (`SOFASCORE_DISCOVERY_ENABLED`, default OFF): `discover_scheduled` roda em paralelo ao AF e `compare_coverage` loga `[A2-SHADOW]` (matched/af_only/sofa_only). NÃO altera a agenda real. Só quando `af_only` ficar consistentemente baixo com volume real é que se promove a fonte.
+
+**Match de cobertura:** fuzzy ratio médio (home+away) ≥ 85, **restrito à mesma liga** — mesma regra do `SofaScoreEventResolver`, herda o anti-FP cross-competição. Cada Sofa fixture casa no máximo 1 AF (consumo único → `sofa_only` exato).
+
+**Alternativas consideradas:**
+- **Flipar discovery direto pra fonte (com AF fallback):** rejeitado por ora — acopla com o passo 3 e arrisca perder jogos que só o AF cobre, sem evidência prévia.
+- **Comparar via resolver (`resolve` por fixture)** em vez de comparação in-memory: rejeitado — gastaria chamadas live por fixture; a comparação de agendas é puro string-match, não precisa de I/O extra além do `discover_scheduled`.
+
+**Trade-offs:**
+- ✅ Risco zero no loop quente (shadow é guardado, no-op com flag OFF ou `USE_SOFASCORE=false`).
+- ✅ Decisão de cutover passa a ser data-driven (dias de `[A2-SHADOW]` com volume real).
+- ❌ Adiciona 1 request/liga/dia ao SofaScore quando ligado (custo baixo, `discover_scheduled` já é 1×/dia).
+- ❌ Não exercita o caminho de *usar* a chave Sofa no loop — isso vem nos passos 1/3 do A2 depois da validação.
+
+**Implementação:** `data/providers/sofascore/discovery.py::compare_coverage` + `CoverageReport`, `main.py::_shadow_discovery_compare` (chamado em `_fetch_today_schedule`), 8 testes em `tests/providers/sofascore/test_discovery.py`. Ver `docs/OPERATIONS.md` (A2 shadow) e `docs/ROADMAP.md` (A2).
+
+**Status:** ATIVA (shadow disponível, flag OFF — aguarda dias de validação com volume real)

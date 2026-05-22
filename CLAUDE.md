@@ -530,6 +530,12 @@ Migrations rodam idempotentes via `storage/database.py::_apply_sql_migrations` n
 | `ODDS_REFETCH_MAX_DRIFT_PCT` | (sem setar → default 0.15) | `0.15` |
 | `BETANO_BRIDGE_URL` | `http://192.168.1.18:8080` | `http://localhost:8080` |
 | `DANEWELL_RENEWER_URL` | `http://192.168.1.5:8081` | idem |
+| `SOFASCORE_WS_ENABLED` | (não setado → OFF) | `false` |
+| `SOFASCORE_DISCOVERY_ENABLED` | (não setado → OFF) | `false` |
+
+> `SOFASCORE_WS_ENABLED` / `SOFASCORE_DISCOVERY_ENABLED` são do A2 (cutover
+> `sofa_event_id`) — código pronto e testado, **default OFF, ainda não ligados em
+> prod**. Ver §13.17.
 
 ### 13.11 Workers ativos em `corner-pressure-elite/workers/`
 
@@ -621,3 +627,13 @@ Ver `docs/CHANGELOG.md` (Sprint M.2), `docs/DECISIONS.md` (2026-05-19), `docs/BU
 - Tab leak no Brave (visto 5 tabs `betano.bet.br/` simultâneas) — investigar se é real ou artefato
 - Sudoers NOPASSWD entry pra `danewell` rodar `systemctl restart brave-betano.service` (pré-requisito do supervisor)
 - AF runtime cleanup (Fase H planejada) — remover código AF não usado depois que P4 estabilizar
+
+### 13.17 A2 — Cutover `sofa_event_id` (branch `feat/remove-af-completely`, EM PROGRESSO)
+
+Objetivo: eliminar AF do discovery/resultado, promovendo `sofa_event_id` a chave
+primária. Plano A1 (dual-key ✅ validado) → A2 (cutover) → A3 (deprecar `fixture_id`).
+Detalhe de fases no `docs/ROADMAP.md`. Estado do código (tudo **default OFF**):
+
+- **`SOFASCORE_DISCOVERY_ENABLED`** — liga o **shadow discovery**: `main.py::_shadow_discovery_compare` roda `data/providers/sofascore/discovery.py::discover_scheduled` em paralelo ao AF e loga `[A2-SHADOW]` (matched/af_only/sofa_only) via `compare_coverage` (fuzzy ratio médio ≥85, restrito à mesma liga). **NÃO muda o que é monitorado** — só mede o que o cutover ganharia/perderia. É a fonte de validação antes de promover o discovery a fonte real. Como observar: `docs/OPERATIONS.md` (A2 shadow).
+- **`SOFASCORE_WS_ENABLED`** — liga o feed WebSocket NATS (`ws_client.py::SofaScoreLiveFeed`, firehose `sport.football`). `main.py::_ws_settle_loop` dispara settle imediato no FT (substitui o cold-check de 2h via AF). NÃO traz stats (escanteios/posse) — só placar/status/FT/cardsCode.
+- **Ainda navega por `fixture_id` AF**: promover discovery a *fonte* da agenda depende de promover `sofa_event_id` a chave de leitura (acoplado). Por isso o shadow primeiro.

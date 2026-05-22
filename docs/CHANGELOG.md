@@ -31,9 +31,11 @@ Próximos passos: (opcional)
 
 - **Redesign visual do dashboard** — `theme.ts` + `globals.css` repaginados; páginas `dashboard`/`jogos-ao-vivo`/`performance`/`sinais-historico`, componentes `robo/*` e `SideNav` ajustados. Rota `/settings` legada removida (deslocada na recovery de 05-20); `logs` virou `page.tsx.disabled`.
 
-**Estado final:** árvore limpa (working tree sem WIP solto), todos os commits na branch `feat/remove-af-completely`. Testes focados de banca/settle/payout: 70 passam. (4 falhas pré-existentes em `test_score`/`test_decision` são de calibração de threshold do `score_engine`, não tocado aqui.)
+- **A2 — shadow discovery (1º incremento do cutover)** — `data/providers/sofascore/discovery.py::compare_coverage` + `main.py::_shadow_discovery_compare`, atrás de `SOFASCORE_DISCOVERY_ENABLED` (default OFF). Roda `discover_scheduled` em paralelo ao AF e loga `[A2-SHADOW]` (matched/af_only/sofa_only) — **não muda o que é monitorado**, só mede o que o cutover ganharia/perderia (dado de validação do passo 4). Match fuzzy ≥85 restrito à mesma liga (herda o anti-FP do resolver). 8 testes novos. Decisão de fazer shadow ANTES de promover o discovery a fonte: `docs/DECISIONS.md` (2026-05-22). Confirmado também que o **WS FT→settle já estava fiado** (`SOFASCORE_WS_ENABLED`, `_ws_settle_loop`).
 
-**Próximos passos:** retomar o A2 (cutover `sofa_event_id`) — wire `discovery.discover_scheduled` + `SofaScoreLiveFeed` no loop (ver ROADMAP).
+**Estado final:** árvore limpa (working tree sem WIP solto), tudo commitado e **pushado** pra branch `feat/remove-af-completely`. Testes focados de banca/settle/payout: 70 passam; suíte sofascore (63, inclui os 8 do shadow) passa. (4 falhas pré-existentes em `test_score`/`test_decision` são calibração de threshold do `score_engine`, não tocado aqui.)
+
+**Próximos passos:** ligar `SOFASCORE_DISCOVERY_ENABLED` em prod e acumular dias de `[A2-SHADOW]` (ver `docs/OPERATIONS.md`); quando `af_only ≈ 0` com volume real, promover o discovery a fonte (depende de promover `sofa_event_id` a chave de leitura — passo 3 do A2 no ROADMAP). Pendência aberta: bug `get_fixture_result_cards` (cartões não apuram resultado).
 
 ---
 
