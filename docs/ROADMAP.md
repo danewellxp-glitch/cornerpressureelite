@@ -102,11 +102,17 @@ Capturado via F12+mitmproxy, analisado, **testado ao vivo**:
   pronto e testado, não fiado no loop ainda).
 
 ### A2 — Cutover (próximo) — `sofa_event_id` vira chave primária
-Pré-requisitos prontos (A1 validado + filtro anti-FP + discovery + WS). Falta:
-1. Wire `discovery.discover_scheduled` como fonte da agenda (atrás de `SOFASCORE_DISCOVERY_ENABLED`), AF como fallback durante transição.
-2. Wire `SofaScoreLiveFeed` no loop: **smart-polling** (re-buscar `/statistics` só no delta) + **FT em tempo real** (substitui cold-check de 2h via AF; conserta tb o bug `get_fixture_result_cards`).
+Pré-requisitos prontos (A1 validado + filtro anti-FP + discovery + WS).
+
+**Já fiado (atrás de flags, default OFF):**
+- ✅ **Shadow discovery** (`SOFASCORE_DISCOVERY_ENABLED`) — `_shadow_discovery_compare` roda `discover_scheduled` em paralelo ao AF e loga `[A2-SHADOW]` (matched/af_only/sofa_only) via `discovery.compare_coverage`. NÃO muda o que é monitorado; gera o dado de validação do passo 4. Ativar e observar logs antes de promover a fonte.
+- ✅ **WS FT→settle** (`SOFASCORE_WS_ENABLED`) — `_ws_settle_loop` no `main.py` dispara settle imediato no FT do firehose NATS (parte do passo 2).
+
+**Falta:**
+1. Promover `discovery.discover_scheduled` a **fonte** da agenda (hoje só shadow), AF como fallback — depende do passo 3 (loop navega por `fixture_id` AF).
+2. Smart-polling: re-buscar `/statistics` só no delta do WS (reduz poll cego 30s).
 3. Promover `sofa_event_id` a chave de leitura nas queries (hoje ainda `fixture_id`).
-4. Smoke + validação de FP com volume real antes de flipar as flags.
+4. Validar FP/cobertura com volume real (via `[A2-SHADOW]`) antes de flipar as flags.
 
 ### A3 — Deprecar `fixture_id` / remover AF do runtime
 Quando A2 estável: `get_live_fixtures` + `get_today_schedule` saem (substituídos por
